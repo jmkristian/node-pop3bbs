@@ -14,7 +14,7 @@ Unlike JNOS, this BBS uses
 a POP server to download messages,
 an SMTP server to send messages,
 an LDAP server to identify users and
-an AGWPE-compatible server to handle AX.25 connections,
+an AGWPE-compatible server to handle AX.25 connections.
 
 To run the BBS:
 1. Clone this repository.
