@@ -1,4 +1,43 @@
-/** Utilities for exchanging data with AGWPE. */
+/** Utilities for exchanging data via AGWPE and AX.25. */
+
+/*
+Received data pass through a chain of function calls;
+transmitted data flow through a pipeline of Transform
+streams, like this:
+
+        Net.Socket
+     ----------------
+       |         ^
+       v         |
+TransformFromAGW |
+       |     TransformToAGW
+       v         ^
+  FrameRelay     |
+       |         |
+       v         |
+  PortRouter     |
+          |      |
+          v      |
+        PortThrottle
+          |      ^
+          v      |
+ConnectionRouter |
+          |      |
+          v      |
+      ConnectionThrottle
+            |    ^
+            |    |
+            |  DataToFrames
+            |    ^
+            v    |
+          Connection
+
+When an AX.25 connection is disconnected, the Connection
+initiates a sequence of calls to DataToFrames.end() and
+ConnectionThrottle.end(). The sequence is connected by
+events: a 'finish' event from Connection and 'end' events
+from DataToFrames and ConnectionThrottle.
+*/
 
 const Bunyan = require('bunyan');
 const EventEmitter = require('events');
@@ -248,17 +287,10 @@ class FrameRelay extends EventEmitter {
         super();
         this.log = getLogger(options, this);
         var that = this;
-        ['error', 'timeout', 'close'].forEach(function(event) {
-            fromAGW.on(event, function(info) {
-                that.emit(event, info);
-            });
-        });
         fromAGW.on('data', function(frame) {
             try {
-                that.log.trace('relay %s frame', frame.dataKind);
                 that.emitFrameFromAGW(frame);
             } catch(err) {
-                that.log.error(err);
                 that.emit('error', err);
             }
         });
@@ -290,8 +322,7 @@ class Router extends EventEmitter {
         });
         var fromAGWClass = fromAGW.constructor.name;
         fromAGW.on('close', function onClose() {
-            that.log.trace('closed %s', fromAGWClass);
-            that.toAGW.destroy();
+            that.log.trace('closed %s; destroy clients', fromAGWClass);
             for (const c in that.clients) {
                 that.clients[c].destroy();
             }
@@ -305,11 +336,16 @@ class Router extends EventEmitter {
                 client = that.newClient(frame);
                 if (client) {
                     that.clients[key] = client;
+                    var clientClass = client.constructor.name;
                     client.on('end', function() {
-                        that.log.trace('ended %s; delete client',
-                                       client.constructor.name);
+                        that.log.trace('ended %s; delete client', clientClass);
                         delete that.clients[key];
                     });
+                    if (that.log.trace()) {
+                        client.on('finish', function() {
+                            that.log.trace('finished %s', clientClass);
+                        });
+                    }
                 }
             }
             try {
@@ -397,18 +433,32 @@ class ConnectionRouter extends Router {
         });
         dataToFrames.pipe(throttle);
         var connection = new Connection(dataToFrames, this.options);
+        var connectionClass = connection.constructor.name;
+        var dataToFramesClass = dataToFrames.constructor.name;
+        var throttleClass = throttle.constructor.name;
         var that = this;
+        // The pipeline of streams from connecton to throttle
+        // is ended by relaying the 'end' events.
+        connection.on('finish', function(info) {
+            that.log.trace('finished %s; %s.end', connectionClass, dataToFramesClass);
+            dataToFrames.end();
+        });
         dataToFrames.on('end', function(info) {
-            that.log.trace('ended %s; %s.end',
-                           dataToFrames.constructor.name,
-                           throttle.constructor.name);
+            that.log.trace('ended %s; %s.end', dataToFramesClass, throttleClass);
             throttle.end();
         });
+        // The connection emits close after the throttle ends;
+        // that is, after data is flushed to the port.
         throttle.on('end', function(info) {
-            that.log.trace('ended %s; %s.emit close',
-                           throttle.constructor.name,
-                           connection.constructor.name);
+            that.log.trace('ended %s; %s.emit close', throttleClass, connectionClass);
             connection.emit('close', info);
+        });
+        ['error', 'timeout'].forEach(function(event) {
+            throttle.on(event, function(info) {
+                that.log.trace('%sed %s; %s.emit %s',
+                               event, throttleClass, connectionClass, event);
+                connection.emit(event, info);
+            });
         });
         this.log.trace('set %s.emitFrameFromAGW', throttle.constructor.name);
         throttle.emitFrameFromAGW = function onFrameFromAGW(frame) {
@@ -445,12 +495,6 @@ class Throttle extends Stream.Transform {
         this.inFlight = 0;
         this.maxInFlight = MaxFramesInFlight;
         var that = this;
-        ['error', 'timeout', 'close'].forEach(function(event) {
-            that.toAGW.on(event, function(info) {
-                that.log.trace('%sed %s', event, that.toAGW.constructor.name);
-                that.emit(event, info);
-            });
-        });
         this.pipe(this.toAGW);
     }
 
@@ -554,7 +598,8 @@ class Throttle extends Stream.Transform {
         this.log.trace('_flush');
         var that = this;
         this.afterFlushed = function destructor(err, data) {
-            that.log.trace('afterFlushed');
+            that.log.trace('afterFlushed; unpipe %s',
+                           that.toAGW.constructor.name);
             that.stopPolling();
             afterFlushed(err, data);
             that.unpipe(that.toAGW); // don't that.toAGW.end()
@@ -650,7 +695,7 @@ class DataToFrames extends Stream.Transform {
     constructor(options) {
         super({
             allowHalfOpen: false,
-            emitClose: true,
+            emitClose: false,
             readableObjectMode: true,
             writableObjectMode: false,
             writableHighWaterMark: 1,
@@ -665,38 +710,13 @@ class DataToFrames extends Stream.Transform {
         var toAGW = options.toAGW;
         var toAGWClass = toAGW.constructor.name;
         var that = this;
-        ['error', 'timeout'].forEach(function(event) {
-            toAGW.on(event, function(info) {
-                if (info) {
-                    that.log.trace('%sed %s; emit;%s %o',
-                                   event, toAGWClass, event, info, );
-                } else {
-                    that.log.trace('%sed %s; emit %s',
-                                   event, toAGWClass, event);
-                }
-                that.emit(event, info);
-            });
-        });
-        toAGW.on('end', function(info) {
-            if (!that.toAGWisClosed) {
-                that.toAGWisClosed = true;
-//                that.log.trace('ended %s; end', toAGWClass);
-//                that.end();
-            }
-        });
-        if (this.log.trace()) {
-            ['finish', 'end'].forEach(function(event) {
-                that.on('finish', function() {
-                    that.log.trace('%sed', event);
-                });
-            });
-        }
     }
 
     _transform(data, encoding, afterTransform) {
         try {
             if (!Buffer.isBuffer(data)) {
-                throw new Error(`DataToFrames._transform ${typeof data}`);
+                afterTransform(new Error(`DataToFrames._transform ${typeof data}`));
+                return;
             }
             if (this.log.trace()) {
                 this.log.trace(`._transform %s`, getDataSummary(data))
@@ -771,9 +791,7 @@ class DataToFrames extends Stream.Transform {
             // this.pushBuffer again. To prevent confusion:
             this.bufferCount = 0;
             this.buffer = null;
-            if (!this.toAGWisClosed) {
-                this.pushData(data);
-            }
+            this.pushData(data);
         }
     }
 
@@ -797,7 +815,7 @@ class Connection extends Stream.Duplex {
     constructor(toAGW, options) {
         super({
             allowHalfOpen: false,
-            emitClose: true,
+            emitClose: false,
             readableObjectMode: false,
             writableObjectMode: false,
             writableHighWaterMark: 1,
@@ -810,31 +828,6 @@ class Connection extends Stream.Duplex {
         this.log.trace('new');
         var that = this;
         var toAGWClass = toAGW.constructor.name;
-        ['finish', 'end'].forEach(function(event) {
-            toAGW.on(event, function() {
-                that.toAGWisFinished = true;
-                that.iAmClosed = true;
-            });
-            that.on(event, function() {
-                if (!that.toAGWisFinished) {
-                    that.log.trace('%sed; %s.end', event, toAGWClass);
-                    that.toAGW.end();
-                    // toAGW will transmit a 'disconnect' frame.
-                }
-            });
-        });
-        ['error', 'timeout'].forEach(function(event) {
-            toAGW.on(event, function(info) {
-                if (info) {
-                    that.log.trace('%sed %s; emit %s %o',
-                                   event, toAGWClass, event, info);
-                } else {
-                    that.log.trace('%sed %s; emit %s',
-                                   event, toAGWClass, event);
-                }
-                that.emit(event, info);
-            });
-        });
     }
 
     onFrameFromAGW(frame) {
@@ -879,11 +872,13 @@ class Server extends EventEmitter {
         var that = this;
         var givenConnection = options && options.AGWPE && options.AGWPE.connection;
         var socket = givenConnection || new Net.Socket();
-        ['error', 'timeout', 'close'].forEach(function(event) {
-            socket.on(event, function(info) {
-                that.log.trace('%s from socket; %s.emit %s',
-                               event, that.fromAGW.constructor.name, event);
-                that.fromAGW.emit(event, info);
+        ['error', 'timeout'].forEach(function(event) {
+            [socket, relay].forEach(function(from) {
+                from.on(event, function(info) {
+                    that.log.trace('%sed %s; emit %s',
+                                   event, from.constructor.name, event);
+                    that.emit(event, info);
+                });
             });
         });
         socket.pipe(this.fromAGW);
