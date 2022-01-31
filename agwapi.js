@@ -9,9 +9,9 @@ streams, like this:
      ----------------
        |         ^
        v         |
-TransformFromAGW |
-       |     TransformToAGW
-       v         ^
+   AGWReader AGWWriter
+       |         ^
+       v         |
   FrameRelay     |
        |         |
        v         |
@@ -186,7 +186,7 @@ function fromHeader(buffer) {
 const EmptyBuffer = Buffer.alloc(0);
 
 /** Transform binary AGWPE frames to objects. */
-class TransformFromAGW extends Stream.Transform {
+class AGWReader extends Stream.Transform {
 
     constructor(options) {
         super({readableObjectMode: true});
@@ -197,11 +197,11 @@ class TransformFromAGW extends Stream.Transform {
 
     _transform(chunk, encoding, afterTransform) {
         if (encoding != 'buffer') {
-            afterTransform(`TransformFromAGW._transform encoding ${encoding}`);
+            afterTransform(`AGWReader._transform encoding ${encoding}`);
             return;
         }
         if (!Buffer.isBuffer(chunk)) {
-            afterTransform(`TransformFromAGW._transform chunk isn't a Buffer`);
+            afterTransform(`AGWReader._transform chunk isn't a Buffer`);
             return;
         }
         if (this.buffer) {
@@ -251,10 +251,10 @@ class TransformFromAGW extends Stream.Transform {
         }
         afterTransform();
     } // _transform
-} // TransformFromAGW
+} // AGWReader
 
 /** Transform objects to binary AGWPE frames. */
-class TransformToAGW extends Stream.Transform {
+class AGWWriter extends Stream.Transform {
 
     constructor(options) {
         super({
@@ -266,7 +266,7 @@ class TransformToAGW extends Stream.Transform {
 
     _transform(chunk, encoding, afterTransform) {
         if ((typeof chunk) != 'object') {
-            afterTransform(`TransformToAGW ${chunk}`);
+            afterTransform(`AGWWriter ${chunk}`);
         } else {
             var frame = toFrame(chunk, encoding);
             if (this.log.debug()) {
@@ -275,17 +275,15 @@ class TransformToAGW extends Stream.Transform {
             afterTransform(null, frame);
         }
     }
-} // TransformToAGW
+} // AGWWriter
 
 /** Receives frames from a stream and passes them to a function.
     The function is injected by the object that wants the frames.
-    Also re-emits some events that are emitted by the stream.
 */
 class FrameRelay extends EventEmitter {
 
-    constructor(fromAGW, options) {
+    constructor(fromAGW) {
         super();
-        this.log = getLogger(options, this);
         var that = this;
         fromAGW.on('data', function(frame) {
             try {
@@ -864,8 +862,8 @@ class Server extends EventEmitter {
         super();
         this.log = getLogger(options, this);
         this.numberOfPorts = null; // until notified otherwise
-        this.fromAGW = new TransformFromAGW(options);
-        this.toAGW = new TransformToAGW(options);
+        this.fromAGW = new AGWReader(options);
+        this.toAGW = new AGWWriter(options);
         var relay = new FrameRelay(this.fromAGW, options);
         var router = new PortRouter(this.toAGW, relay, options, this);
         if (onConnect) this.on('connection', onConnect);
@@ -940,6 +938,6 @@ class Server extends EventEmitter {
     }
 } // Server
 
-exports.Reader = TransformFromAGW;
-exports.Writer = TransformToAGW;
+exports.Reader = AGWReader;
+exports.Writer = AGWWriter;
 exports.Server = Server;
