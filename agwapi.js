@@ -305,16 +305,8 @@ class Router extends EventEmitter {
                 client = that.newClient(frame);
                 if (client) {
                     that.clients[key] = client;
-                    if (that.log.trace()) {
-                        ['finish', 'end'].forEach(function(event) {
-                            client.on(event, function() {
-                                // This is mildly interesting, but doesn't require a response.
-                                that.log.trace('%sed %s', event, client.constructor.name);
-                            });
-                        });
-                    }
-                    client.on('close', function() {
-                        that.log.trace('closed %s; delete client',
+                    client.on('end', function() {
+                        that.log.trace('ended %s; delete client',
                                        client.constructor.name);
                         delete that.clients[key];
                     });
@@ -401,16 +393,22 @@ class ConnectionRouter extends Router {
             theirCall: frame.callFrom,
             toAGW: throttle,
             frameLength: this.options.frameLength,
-            log: this.options.log,
+            logger: this.options.logger,
         });
         dataToFrames.pipe(throttle);
         var connection = new Connection(dataToFrames, this.options);
         var that = this;
-        dataToFrames.on('finish', function(info) {
-            that.log.trace('finished %s; %s.end()',
+        dataToFrames.on('end', function(info) {
+            that.log.trace('ended %s; %s.end',
                            dataToFrames.constructor.name,
                            throttle.constructor.name);
             throttle.end();
+        });
+        throttle.on('end', function(info) {
+            that.log.trace('ended %s; %s.emit close',
+                           throttle.constructor.name,
+                           connection.constructor.name);
+            connection.emit('close', info);
         });
         this.log.trace('set %s.emitFrameFromAGW', throttle.constructor.name);
         throttle.emitFrameFromAGW = function onFrameFromAGW(frame) {
@@ -445,6 +443,7 @@ class Throttle extends Stream.Transform {
         this.log = getLogger(options, this);
         this.log.trace('new');
         this.inFlight = 0;
+        this.maxInFlight = MaxFramesInFlight;
         var that = this;
         ['error', 'timeout', 'close'].forEach(function(event) {
             that.toAGW.on(event, function(info) {
@@ -473,9 +472,10 @@ class Throttle extends Stream.Transform {
                     // If you send a disconnect frame immediately,
                     // the previous data won't be transmitted.
                     // So wait until inFlight == 0 to send nextFrame.
-                    this.log.trace('lastFrame %o', nextFrame);
+                    this.log.trace('lastFrame = %j', nextFrame);
                     this.lastFrame = nextFrame;
                     this.buffer = {frame: nextFrame, afterPush: this.afterFlushed};
+                    this.maxInFlight = 1;
                     this.afterFlushed = null;
                 } else { // flushing is complete
                     this.afterFlushed();
@@ -485,8 +485,7 @@ class Throttle extends Stream.Transform {
             }
         }
         // There is a buffer. Can we push it?
-        var maxInFlight = this.lastFrame ? 1 : MaxFramesInFlight;
-        if (this.inFlight >= maxInFlight) {
+        if (this.inFlight >= this.maxInFlight) {
             if (!this.polling) {
                 this.log.trace('start polling');
                 this.polling = setInterval(function(that) {
@@ -497,7 +496,8 @@ class Throttle extends Stream.Transform {
             var nextBuffer = this.buffer;
             this.buffer = null;
             this.pushFrame(nextBuffer.frame, nextBuffer.afterPush);
-            if (++this.inFlight < maxInFlight) {
+            ++this.inFlight;
+            if (this.inFlight < this.maxInFlight) {
                 this.stopPolling();
             }
         }
@@ -524,7 +524,6 @@ class Throttle extends Stream.Transform {
     }
 
     _transform(frame, encoding, afterTransform) {
-        var maxInFlight = this.lastFrame ? 1 : MaxFramesInFlight;
         if (this.inFlight >= MaxFramesInFlight) {
             // Don't send it now.
             if (this.buffer) {
@@ -541,9 +540,9 @@ class Throttle extends Stream.Transform {
         } else {
             this.pushFrame(frame, afterTransform);
             ++this.inFlight;
-            if (this.inFlight < maxInFlight) {
+            if (this.inFlight < this.maxInFlight) {
                 this.stopPolling();
-                if (this.inFlight == maxInFlight / 2) {
+                if (this.inFlight > 0 && (this.inFlight == this.maxInFlight / 2)) {
                     // Look ahead, to possibly avoid polling later:
                     this.pushFrame(this.queryFramesInFlight());
                 }
@@ -555,10 +554,10 @@ class Throttle extends Stream.Transform {
         this.log.trace('_flush');
         var that = this;
         this.afterFlushed = function destructor(err, data) {
+            that.log.trace('afterFlushed');
             that.stopPolling();
             afterFlushed(err, data);
             that.unpipe(that.toAGW); // don't that.toAGW.end()
-            that.destroy(); // causes that.emit('close')
         }
         this.pushBuffer();
     }
@@ -620,9 +619,9 @@ class ConnectionThrottle extends Throttle {
             this.updateFramesInFlight(frame);
             break;
         case 'd': // disconnected
-            this.unpipe(this.toAGW);
-            this.log.trace(`destroy`);
-            this.destroy();
+            this.log.trace('received d frame');
+            this.receivedDisconnect = true;
+            this.emitFrameFromAGW(frame);
             break;
         default:
             this.emitFrameFromAGW(frame);
@@ -630,7 +629,7 @@ class ConnectionThrottle extends Throttle {
     }
 
     createLastFrame() {
-        return {
+        return this.receivedDisconnect ? null : {
             dataKind: 'd', // disconnect
             port: this.port,
             callFrom: this.myCall,
@@ -660,12 +659,13 @@ class DataToFrames extends Stream.Transform {
         this.myCall = options.myCall;
         this.theirCall = options.theirCall;
         this.maxDataLength = options.frameLength || 256;
-        var toAGW = options.toAGW;
         this.log = getLogger(options, this);
+        this.log.trace('new');
         this.bufferCount = 0;
+        var toAGW = options.toAGW;
+        var toAGWClass = toAGW.constructor.name;
         var that = this;
         ['error', 'timeout'].forEach(function(event) {
-            var toAGWClass = toAGW.constructor.name;
             toAGW.on(event, function(info) {
                 if (info) {
                     that.log.trace('%sed %s; emit;%s %o',
@@ -677,16 +677,18 @@ class DataToFrames extends Stream.Transform {
                 that.emit(event, info);
             });
         });
-        toAGW.on('close', function(info) {
+        toAGW.on('end', function(info) {
             if (!that.toAGWisClosed) {
                 that.toAGWisClosed = true;
-                that.log.trace('destroy');
-                that.destroy();
+//                that.log.trace('ended %s; end', toAGWClass);
+//                that.end();
             }
         });
         if (this.log.trace()) {
-            this.on('finish', function() {
-                that.log.trace('finished');
+            ['finish', 'end'].forEach(function(event) {
+                that.on('finish', function() {
+                    that.log.trace('%sed', event);
+                });
             });
         }
     }
@@ -753,9 +755,7 @@ class DataToFrames extends Stream.Transform {
 
     _flush(afterFlush) {
         this.log.trace(`_flush`);
-        if (!this.toAGWisClosed) {
-            this.pushBuffer();
-        }
+        this.pushBuffer();
         afterFlush();
     }
 
@@ -771,7 +771,9 @@ class DataToFrames extends Stream.Transform {
             // this.pushBuffer again. To prevent confusion:
             this.bufferCount = 0;
             this.buffer = null;
-            this.pushData(data);
+            if (!this.toAGWisClosed) {
+                this.pushData(data);
+            }
         }
     }
 
@@ -805,23 +807,19 @@ class Connection extends Stream.Duplex {
         this.myCall = toAGW.myCall;
         this.theirCall = toAGW.theirCall;
         this.log = getLogger(options, this);
+        this.log.trace('new');
         var that = this;
         var toAGWClass = toAGW.constructor.name;
-        ['finish', 'end', 'close'].forEach(function(event) {
+        ['finish', 'end'].forEach(function(event) {
+            toAGW.on(event, function() {
+                that.toAGWisFinished = true;
+                that.iAmClosed = true;
+            });
             that.on(event, function() {
-                if (!that.iAmFinished) {
-                    that.log.trace('%sed; %s.end',
-                                   event, that.toAGW.constructor.name);
-                    that.iAmFinished = true;
+                if (!that.toAGWisFinished) {
+                    that.log.trace('%sed; %s.end', event, toAGWClass);
                     that.toAGW.end();
                     // toAGW will transmit a 'disconnect' frame.
-                }
-            });
-            toAGW.on(event, function() {
-                if (!that.iAmDestroyed) {
-                    that.log.trace('%sed %s; destroy', event, toAGWClass);
-                    that.destroy(); // will cause that.emit('close')
-                    that.iAmDestroyed = true;
                 }
             });
         });
@@ -840,9 +838,17 @@ class Connection extends Stream.Duplex {
     }
 
     onFrameFromAGW(frame) {
-        this.log.trace('onFrameFromAGW %s', frame.dataKind);
-        if (frame.dataKind == 'D' && !this.iAmFinished) {
-            this.push(frame.data);
+        this.log.trace('received %s frame', frame.dataKind);
+        switch(frame.dataKind) {
+        case 'D': // data
+            if (!this.iAmClosed) {
+                this.push(frame.data);
+            }
+            break;
+        case 'd': // disconnect
+            this.end();
+            break;
+        default:
         }
     }
 
