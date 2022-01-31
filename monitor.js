@@ -1,4 +1,4 @@
-/** Monitor AX.25 traffic. */
+/** Monitor AX.25 traffic. This works best with log.level=DEBUG in config.ini. */
 
 const AGW = require('./agwapi');
 const Config = require('./config').readFile('config.ini');
