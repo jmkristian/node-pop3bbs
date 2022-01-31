@@ -26,8 +26,9 @@ To run the BBS:
 5. Copy config-example.ini to config.ini.
 6. Edit config.ini to identify:
    * your POP, SMTP, LDAP and AGWPE servers
-   * where to find users' entries in the LDAP directory (baseDN)
-   * an LDAP user authorized to read users' passwords (bindDN)
+   * an LDAP user authorized to read users' passwords (bindDN and password)
+   * how to find a user's password in the LDAP directory
+     (baseDN, userIdAttribute and passwordAttribute)
 7. Run the command `node ./bbs.js`
 
 A user's email address is their call sign plus the POP emailDomain in config.ini.
@@ -36,7 +37,11 @@ A user may read other mailboxes using the BBS 'AREA' command, but
 may not delete mail from them, nor send email while reading them.
 This is useful for publishing bulletins to be read by all users.
 Outpost can be configured to automatically download these bulletins,
-and not download the same bulletin repeatedly.
+and not download a bulletin repeatedly.
+
+The output from bbs.js is generated using [Bunyan](https://www.npmjs.com/package/bunyan).
+You can convert it to a more humane format by piping it through
+`./node_modules/.bin/bunyan --output short` .
 
 This software works on Windows and Linux, with
 [node.js](https://nodejs.org/en/) version 10.18.1,
