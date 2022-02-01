@@ -28,7 +28,7 @@ To run the BBS:
    * your POP, SMTP, LDAP and AGWPE servers
    * an LDAP user authorized to read users' passwords (bindDN and password)
    * how to find a user's password in the LDAP directory
-     (baseDN, userIdAttribute and passwordAttribute)
+     (URL, userIdAttribute and passwordAttribute)
 7. Run the command `node ./bbs.js`
 
 A user's email address is their call sign plus the POP emailDomain in config.ini.

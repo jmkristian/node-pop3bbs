@@ -97,7 +97,7 @@ function getAttributes(entry) {
             });
         }
     } catch(err) {
-        log.warn(`%o from getAttributes `, entry);
+        log.warn(`%o from getAttributes `, attributes);
     }
     return attributes;
 }
@@ -307,14 +307,17 @@ class CLI extends EventEmitter {
                         } else {
                             var firstEntry = null;
                             results.on('error', function(err) {
-                                log.warn('LDAP< searchError %s %o', err.message, err);
+                                log.warn(err, 'LDAP< searchError %s', err.message);
                                 finish(`LDAP error ${err.message}`);
                             });
                             results.on('searchEntry', function(entry) {
+                                var attrs = getAttributes(entry);
+                                log.debug('LDAP< %o', {
+                                    objectName: entry.objectName,
+                                    attributes: attrs,
+                                });
                                 if (!firstEntry) {
                                     firstEntry = entry;
-                                    var attrs = getAttributes(entry);
-                                    log.debug('LDAP< %o', attrs);
                                     var userName = (attrs[userNameAttribute] &&
                                                     attrs[userNameAttribute][0]) || '';
                                     var password = (attrs[passwordAttribute] &&
@@ -324,7 +327,13 @@ class CLI extends EventEmitter {
                             });
                             results.on('end', function(result) {
                                 if (!firstEntry) {
-                                    log.warn(`LDAP< searchEnd %o`, result);
+                                    log.warn(`LDAP< searchEnd %o`, {
+                                        status: result.status,
+                                        matchedDN: result.matchedDN,
+                                        errorMessage: result.errorMessage || null,
+                                        sentEntries: result.sentEntries,
+                                        attributes: getAttributes(result),
+                                    });
                                     finish(`${loginName} is not in the directory.`);
                                 }
                             });
@@ -333,7 +342,7 @@ class CLI extends EventEmitter {
                 }
             });
         } catch(err) {
-            console.trace(err);
+            log.warn(err, 'LDAP');
             next(`LDAP ${err}`);
         }
     }
@@ -371,32 +380,38 @@ class CLI extends EventEmitter {
                 }
             });
         } catch(err) {
-            console.trace(`POP threw ${err}`);
+            log.warn(err, 'POP');
             next(`POP threw ${err}`);
         }
     }
 
     setArea(newArea) {
         var that = this;
-        this.POP.quit(function(err) {
-            if (err) {
-                that.AX25.write(`${EOL}${err}${EOL}${Prompt}`);
-            } else {
-                that.logIn(newArea, function(err, userName, password) {
-                    if (err) {
-                        that.AX25.write(`${EOL}${err}${EOL}${Prompt}`);
-                    } else {
-                        that.login = {userName: userName, password: password};
-                        that.openPOP(function(err) {
-                            if (err) {
-                                that.AX25.write(`${EOL}${err}${EOL}${Prompt}`);
-                            }
-                            that.AX25.write(`${EOL}${Prompt}`);
-                        });
-                    }
-                });
-            }
-        });
+        var next = function() {
+            that.logIn(newArea, function(err, userName, password) {
+                if (err) {
+                    that.AX25.write(`${EOL}${err}${EOL}${Prompt}`);
+                } else {
+                    that.login = {userName: userName, password: password};
+                    that.openPOP(function(err) {
+                        if (err) {
+                            that.AX25.write(`${EOL}${err}${EOL}${Prompt}`);
+                        }
+                        that.AX25.write(`${EOL}${Prompt}`);
+                    });
+                }
+            });
+        }
+        if (this.POP) {
+            this.POP.quit(function(err) {
+                if (err) {
+                    that.AX25.write(`${EOL}${err}${EOL}${Prompt}`);
+                }
+                next();
+            });
+        } else {
+            next();
+        }
     }
 
     isMyArea() {
@@ -506,7 +521,7 @@ class CLI extends EventEmitter {
             numbers.push(parseInt(s));
             // I tried doing this with Array.map, and failed.
         });
-        log.debug('readMessages %j', numbers);
+        log.debug('readMessages %o', numbers);
         var that = this;
         this.POP.retrieve(numbers, function(err, messages) {
             if (err) throw err;
@@ -591,7 +606,7 @@ class CLI extends EventEmitter {
             if (message.headers) {
                 m.headers = message.headers;
             }
-            log.info('SMTP> %j, body.length: %d', m, body.length);
+            log.info('SMTP> %o, body.length: %d', m, body.length);
             m.text = body.toString('utf-8');
             smtp.sendMail(m, function(err, info) {
                 if (err) {
