@@ -270,8 +270,8 @@ class CLI extends EventEmitter {
         return from + '@' + Config.POP.emailDomain;
     }
 
-    logIn(loginName, next) {
-        var uid = loginName.toLowerCase();
+    logIn(areaName, next) {
+        var area = areaName.toLowerCase();
         var that = this;
         try {
             var ldap = LDAP.createClient({
@@ -293,11 +293,12 @@ class CLI extends EventEmitter {
                     log.warn(err, `LDAP< bind`);
                     finish(`LDAP ${err}`);
                 } else {
+                    var areaNameAttribute = Config.LDAP.callSignAttribute || Config.LDAP.userIdAttribute;
                     var userNameAttribute = Config.LDAP.userIdAttribute;
                     var passwordAttribute = Config.LDAP.passwordAttribute;
                     ldap.search(Config.LDAP.baseDN, {
                         scope: 'sub',
-                        filter: `${userNameAttribute}=${uid}`,
+                        filter: `${areaNameAttribute}=${area}`,
                         attributes: [userNameAttribute, passwordAttribute],
                         sizeLimit: 1,
                     }, function(err, results) {
@@ -334,7 +335,7 @@ class CLI extends EventEmitter {
                                         sentEntries: result.sentEntries,
                                         attributes: getAttributes(result),
                                     });
-                                    finish(`${loginName} is not in the directory.`);
+                                    finish(`${areaName} is not in the directory.`);
                                 }
                             });
                         }
