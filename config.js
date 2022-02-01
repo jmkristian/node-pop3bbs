@@ -44,10 +44,18 @@ function groom(config) {
                 config.LDAP.baseDN = ''; // search from the root
             }
         } else {
-            config.LDAP.port = parseInt(config.LDAP.port || '339');
+            var url = 'ldap://';
             if (config.LDAP.host) {
-                config.LDAP.URL = [`ldap://${config.LDAP.host}:${config.LDAP.port}`];
+                url += config.LDAP.host;
             }
+            if (config.LDAP.port) {
+                config.LDAP.port = parseInt(config.LDAP.port);
+                url += `:${config.LDAP.port}`;
+            }
+            if (config.LDAP.baseDN) {
+                url += `/${config.LDAP.baseDN}`;
+            }
+            config.LDAP.URL = url;
         }
     }
     if (config.log) {
