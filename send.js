@@ -6,7 +6,7 @@
 */
 
 const AGW = require('./agwapi');
-const Config = require('./config').readFile('config.ini');
+const Config = require('./config').readFile(process.argv[2] || 'config.ini');
 const Readline = require('readline');
 const Stream = require('stream');
 
@@ -98,6 +98,6 @@ server.on('connection', function(agw) {
         }
     });
 });
-server.listen({callTo: 'W6JMK-1'}, function(info) {
+server.listen({callTo: Config.AGWPE.myCallSigns}, function(info) {
     log.info('AGW listening %o', info);
 });

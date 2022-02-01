@@ -6,6 +6,9 @@ function groom(config) {
     if (config.AGWPE) {
         config.AGWPE.port = parseInt(config.AGWPE.port || '8000');
         config.AGWPE.frameLength = parseInt(config.AGWPE.frameLength || '256');
+        if (config.AGWPE.myCallSigns) {
+            config.AGWPE.myCallSigns = config.AGWPE.myCallSigns.trim().split(/\s+/);
+        }
     }
     if (config.LDAP) {
         if (!config.LDAP.userIdAttribute) {

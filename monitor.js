@@ -1,7 +1,7 @@
 /** Monitor AX.25 traffic. This works best with log.level=DEBUG in config.ini. */
 
 const AGW = require('./agwapi');
-const Config = require('./config').readFile('config.ini');
+const Config = require('./config').readFile(process.argv[2] || 'config.ini');
 const Net = require('net');
 
 const log = Config.logger;
@@ -35,7 +35,7 @@ try {
                 toAGW.write({dataKind: 'm', port: p}); // Monitor
                 /*
                   toAGW.write({dataKind: 'M', port: 0, // Send an unproto packet
-                  callFrom: 'W6JMK-1', callTo: 'ID',
+                  callFrom: Config.AGWPE.myCallSigns[0], callTo: 'ID',
                   data: 'CM87wj'});
                 */
             }

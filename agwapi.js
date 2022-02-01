@@ -924,8 +924,12 @@ class Server extends EventEmitter {
                 }
             }
         } else if (Array.isArray(options.port)) {
-            options.port.forEach(function(port) {
-                that.listen(mergeOptions(options, {port: port}));
+            options.port.forEach(function(onePort) {
+                that.listen(mergeOptions(options, {port: onePort}));
+            });
+        } else if (Array.isArray(options.callTo)) {
+            options.callTo.forEach(function(oneCall) {
+                that.listen(mergeOptions(options, {callTo: oneCall}));
             });
         } else {
             this.toAGW.write({

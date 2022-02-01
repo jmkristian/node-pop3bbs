@@ -1,7 +1,7 @@
 /** Echo AX.25 traffic. */
 
 const AGW = require('./agwapi');
-const Config = require('./config').readFile('config.ini');
+const Config = require('./config').readFile(process.argv[2] || 'config.ini');
 
 var server = new AGW.Server(
     Config,
@@ -27,6 +27,6 @@ var server = new AGW.Server(
 server.on('error', function(err) {
     throw err;
 });
-server.listen({callTo: 'W6JMK-1'}, function(info) {
+server.listen({callTo: Config.AGWPE.myCallSigns}, function(info) {
     console.log('listening ' + JSON.stringify(info));
 });
