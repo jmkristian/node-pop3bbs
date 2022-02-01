@@ -503,12 +503,16 @@ class CLI extends EventEmitter {
             throw 'threw ' + line;
         case 'b':
         case 'bye':
-            this.POP.quit(function(err) {
-                if (err) {
-                    that.AX25.write(`${err}${EOL}`);
-                }
+            if (this.POP) {
+                this.POP.quit(function(err) {
+                    if (err) {
+                        that.AX25.write(`${err}${EOL}`);
+                    }
+                    that.AX25.end(`Goodbye.${EOL}`);
+                });
+            } else {
                 that.AX25.end(`Goodbye.${EOL}`);
-            });
+            }
             return;
         default:
             this.AX25.write(line + `?`);
