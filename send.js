@@ -45,7 +45,11 @@ function newTestData(size) {
 class TestDataStream extends Stream.Readable {
 
     constructor(reps, size) {
-        super({objectMode: true, emitClose: false});
+        super({
+            emitClose: false,
+            objectMode: false,
+            highWaterMark: size,
+        });
         this.r = 1;
         this.reps = reps;
         this.size = size;
@@ -73,7 +77,9 @@ server.on('close', function(err) {log.info(`AGW closed`);});
 server.on('connection', function(agw) {
     log.info('AX.25 connected from %s', agw.theirCall);
     agw.on('error', function(err) {log.warn(err, `AX.25`);});
+    agw.on('timeout', function(err) {log.warn(err, `AX.25`);});
     agw.on('finish', function() {log.debug(`AX.25 finished`);});
+    agw.on('end', function() {log.debug(`AX.25 ended`);});
     agw.on('close', function() {log.info(`AX.25 closed`);});
     var lines = Readline.createInterface({input: agw});
     lines.on('line', function(command) {

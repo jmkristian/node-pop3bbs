@@ -1,5 +1,4 @@
 /** Utilities for exchanging data via AGWPE and AX.25. */
-
 /*
 Received data pass through a chain of function calls;
 transmitted data flow through a pipeline of Transform
@@ -46,6 +45,7 @@ const Stream = require('stream');
 
 const HeaderLength = 36;
 const NoPID = 0xF0;
+const KByte = 1 << 10;
 
 const LogNothing = Bunyan.createLogger({
     name: 'stub',
@@ -169,7 +169,7 @@ function toFrame(from, encoding) {
 
 /** Convert a binary AGWPE frame header to an object. */
 function fromHeader(buffer) {
-    if (buffer.length < 36) {
+    if (buffer.length < HeaderLength) {
         throw `buffer.length ${buffer.length} is shorter than a header`;
     }
     var into = {
@@ -189,7 +189,12 @@ const EmptyBuffer = Buffer.alloc(0);
 class AGWReader extends Stream.Transform {
 
     constructor(options) {
-        super({readableObjectMode: true});
+        super({
+            readableObjectMode: true,
+            readableHighWaterMark: 1, // frame
+            writableObjectMode: false,
+            writableHighWaterMark: HeaderLength + options.AGWPE.frameLength, // bytes
+        });
         this.header = Buffer.alloc(HeaderLength);
         this.headerLength = 0;
         this.log = getLogger(options, this);
@@ -258,8 +263,11 @@ class AGWWriter extends Stream.Transform {
 
     constructor(options) {
         super({
+            readableObjectMode: false,
+            readableHighWaterMark: HeaderLength + options.AGWPE.frameLength, // bytes
             writableObjectMode: true,
-            defaultEncoding: options && options.encoding,
+            writableHighWaterMark: 1, // frame
+            defaultEncoding: options && options.AGWPE.encoding,
         });
         this.log = getLogger(options, this);
     }
@@ -303,12 +311,12 @@ class Router extends EventEmitter {
 
     constructor(toAGW, fromAGW, options, server) {
         super();
+        this.log = getLogger(options, this);
+        this.log.trace('new %o', options.AGWPE);
         this.toAGW = toAGW;
         this.fromAGW = fromAGW;
         this.options = options;
         this.server = server;
-        this.log = getLogger(options, this);
-        this.log.trace('new');
         this.clients = {};
         var that = this;
         ['error', 'timeout'].forEach(function(event) {
@@ -421,14 +429,7 @@ class ConnectionRouter extends Router {
             return null;
         }
         var throttle = new ConnectionThrottle(this.toAGW, this.options, frame);
-        var dataToFrames = new DataToFrames({
-            port: frame.port,
-            myCall: frame.callTo,
-            theirCall: frame.callFrom,
-            toAGW: throttle,
-            frameLength: this.options.frameLength,
-            logger: this.options.logger,
-        });
+        var dataToFrames = new DataToFrames(this.options, frame);
         dataToFrames.pipe(throttle);
         var connection = new Connection(dataToFrames, this.options);
         var connectionClass = connection.constructor.name;
@@ -448,8 +449,9 @@ class ConnectionRouter extends Router {
         // The connection emits close after the throttle ends;
         // that is, after data is flushed to the port.
         throttle.on('end', function(info) {
-            that.log.trace('ended %s; %s.emit close', throttleClass, connectionClass);
-            connection.emit('close', info);
+            that.log.trace('ended %s; %s.emitClose',
+                           throttleClass, connectionClass);
+            connection.emitClose();
         });
         ['error', 'timeout'].forEach(function(event) {
             throttle.on(event, function(info) {
@@ -483,17 +485,19 @@ class Throttle extends Stream.Transform {
 
     constructor(toAGW, options) {
         super({
-            highWaterMark: 8,
             readableObjectMode: true,
+            readableHighWaterMark: 1,
             writableObjectMode: true,
+            writableHighWaterMark: 1,
         });
-        this.toAGW = toAGW;
         this.log = getLogger(options, this);
-        this.log.trace('new');
+        this.log.trace('new %o', options.AGWPE);
+        this.toAGW = toAGW;
         this.inFlight = 0;
         this.maxInFlight = MaxFramesInFlight;
-        var that = this;
         this.pipe(this.toAGW);
+        this.pushFrame(this.queryFramesInFlight());
+        // The response will initialize this.inFlight.
     }
 
     updateFramesInFlight(frame) {
@@ -600,7 +604,8 @@ class Throttle extends Stream.Transform {
                            that.toAGW.constructor.name);
             that.stopPolling();
             afterFlushed(err, data);
-            that.unpipe(that.toAGW); // don't that.toAGW.end()
+            that.unpipe(that.toAGW);
+            that.emit('end');
         }
         this.pushBuffer();
     }
@@ -690,24 +695,22 @@ const MaxWriteDelay = 250; // msec
 */
 class DataToFrames extends Stream.Transform {
 
-    constructor(options) {
+    constructor(options, frame) {
         super({
             allowHalfOpen: false,
             emitClose: false,
             readableObjectMode: true,
+            readableHighWaterMark: 1,
             writableObjectMode: false,
-            writableHighWaterMark: 1,
+            writableHighWaterMark: options.AGWPE.frameLength,
         });
-        this.port = options.port;
-        this.myCall = options.myCall;
-        this.theirCall = options.theirCall;
-        this.maxDataLength = options.frameLength || 256;
         this.log = getLogger(options, this);
-        this.log.trace('new');
+        this.log.trace('new %o', options.AGWPE);
+        this.port = frame.port;
+        this.myCall = frame.callTo;
+        this.theirCall = frame.callFrom;
+        this.maxDataLength = options.AGWPE.frameLength;
         this.bufferCount = 0;
-        var toAGW = options.toAGW;
-        var toAGWClass = toAGW.constructor.name;
-        var that = this;
     }
 
     _transform(data, encoding, afterTransform) {
@@ -717,7 +720,7 @@ class DataToFrames extends Stream.Transform {
                 return;
             }
             if (this.log.trace()) {
-                this.log.trace(`._transform %s`, getDataSummary(data))
+                this.log.trace(`_transform %s length %d`, getDataSummary(data), data.length)
             }
             if (this.bufferCount + data.length < this.maxDataLength) {
                 if (this.buffer == null) {
@@ -751,7 +754,7 @@ class DataToFrames extends Stream.Transform {
                 for (; dataNext < data.length; dataNext += this.maxDataLength) {
                     var dataEnd = dataNext + this.maxDataLength;
                     if (dataEnd <= data.length) {
-                        this.pushData(data.subarray(dataNext, dataEnd));
+                        this.pushFrame(data.subarray(dataNext, dataEnd));
                     } else {
                         this.buffer = Buffer.alloc(this.maxDataLength);
                         this.bufferCount = data.length - dataNext;
@@ -789,11 +792,11 @@ class DataToFrames extends Stream.Transform {
             // this.pushBuffer again. To prevent confusion:
             this.bufferCount = 0;
             this.buffer = null;
-            this.pushData(data);
+            this.pushFrame(data);
         }
     }
 
-    pushData(data) {
+    pushFrame(data) {
         if (data.length > 0) {
             var frame = {
                 dataKind: 'D',
@@ -802,6 +805,9 @@ class DataToFrames extends Stream.Transform {
                 callTo: this.theirCall,
                 data: data,
             };
+            if (this.log.trace()) {
+                this.log.trace('pushFrame %s', getFrameSummary(frame));
+            }
             this.push(frame);
         }
     }
@@ -812,20 +818,30 @@ class Connection extends Stream.Duplex {
 
     constructor(toAGW, options) {
         super({
-            allowHalfOpen: false,
-            emitClose: false,
+            allowHalfOpen: true,
+            emitClose: false, // emitClose: true doesn't always emit close.
             readableObjectMode: false,
+            readableHighWaterMark: 4 * KByte,
             writableObjectMode: false,
-            writableHighWaterMark: 1,
+            writableHighWaterMark: options.AGWPE.frameLength,
         });
+        this.log = getLogger(options, this);
+        this.log.trace('new %o', options.AGWPE);
         this.toAGW = toAGW;
         this.port = toAGW.port;
         this.myCall = toAGW.myCall;
         this.theirCall = toAGW.theirCall;
-        this.log = getLogger(options, this);
-        this.log.trace('new');
-        var that = this;
-        var toAGWClass = toAGW.constructor.name;
+    }
+
+    emitClose() {
+        // The documentation seems to say this.destroy() should emit
+        // 'end' and 'close', but I find that doesn't always happen.
+        // This works reliably:
+        if (!this.iAmClosed) {
+            this.iAmClosed = true;
+            this.emit('end');
+            this.emit('close');
+        }
     }
 
     onFrameFromAGW(frame) {
