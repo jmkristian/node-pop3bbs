@@ -30,14 +30,14 @@ function newTestData(size) {
     var x = 0;
     for (; x < (size >> 8); ++x) {
         data.write(Data256.replace(/x/g, (x & 0xF).toString(16)), next, 'ascii');
-        data.write((x >> 8).toString(16), next, 'ascii');
+        data.write((x >> 4).toString(16), next, 'ascii');
         next += 256;
     }
     if (next < size) {
         data.write(Data256.slice(0, size - next)
                    .replace(/x/g, (x & 0xF).toString(16)),
                    next, 'ascii');
-        data.write((x >> 8).toString(16), next, 'ascii');
+        data.write((x >> 4).toString(16), next, 'ascii');
     }
     return data;
 }
