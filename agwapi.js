@@ -293,7 +293,7 @@ class FrameRelay extends EventEmitter {
     constructor(fromAGW) {
         super();
         var that = this;
-        fromAGW.on('data', function(frame) {
+        fromAGW.on('data', function onFrameFromAGW(frame) {
             try {
                 that.emitFrameFromAGW(frame);
             } catch(err) {
@@ -849,7 +849,12 @@ class Connection extends Stream.Duplex {
         switch(frame.dataKind) {
         case 'D': // data
             if (!this.iAmClosed) {
-                this.push(frame.data);
+                if (!this.receiveBufferIsFull) {
+                    this.receiveBufferIsFull = !this.push(frame.data);
+                } else {
+                    this.emit('error', new Error('receive buffer overflow: '
+                                                 + getDataSummary(frame.data)));
+                }
             }
             break;
         case 'd': // disconnect
@@ -860,6 +865,7 @@ class Connection extends Stream.Duplex {
     }
 
     _read(size) {
+        this.receiveBufferIsFull = false;
         // onFrameFromAGW calls this.push.
     }
 
