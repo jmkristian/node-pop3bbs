@@ -336,33 +336,76 @@ class CLI extends EventEmitter {
         }
     }
 
-    setArea(newArea) {
-        var that = this;
-        var next = function() {
-            that.logIn(newArea, function(err, userName, password) {
-                if (err) {
-                    that.AX25.write(`${EOL}${err}${EOL}${Prompt}`);
-                } else {
-                    that.login = {userName: userName, password: password};
-                    that.openPOP(function(err) {
-                        if (err) {
-                            that.AX25.write(`${EOL}${err}${EOL}${Prompt}`);
-                        }
-                        that.AX25.write(`${EOL}${Prompt}`);
-                    });
-                }
-            });
-        }
+    closePOP(next) {
         if (this.POP) {
             this.POP.quit(function(err) {
                 if (err) {
-                    that.AX25.write(`${EOL}${err}${EOL}${Prompt}`);
+                    that.AX25.write(`${err}${EOL}`);
                 }
                 next();
             });
         } else {
             next();
         }
+    }
+
+    listMessages() {
+        var finish = function(err) {
+            if (err) {
+                log.warn(err, 'POP');
+                that.AX25.write(`POP ${err}${EOL}`);
+            }
+            that.AX25.write(`${EOL}${Prompt}`);
+        }
+        try {
+            var count = this.popCount;
+            var that = this;
+            this.AX25.write(`Mail area: ${this.login.userName}${EOL}`
+                            + `${count} messages  -  ${count} new${EOL}${EOL}`);
+            this.POP.list(function(err, sizes) {
+                if (err) {
+                    finish(err);
+                    return;
+                }
+                if (!sizes) sizes = [];
+                var showMessage = function showMessage(m) {
+                    if (m > count) {
+                        finish();
+                    } else {
+                        that.POP.top(m, 0, function(err, message) {
+                            if (err) {
+                                that.AX25.write(`POP top(${m}, 0) ${err}${EOL}`);
+                            } else {
+                                log.debug(`POP< %o`, message);
+                                that.AX25.write(summarize(m, sizes[m], message) + EOL);
+                            }
+                            showMessage(m + 1);    
+                        });
+                    }
+                };
+                that.AX25.write(summarize(0) + EOL);
+                showMessage(1);
+            });
+        } catch(err) {
+            finish(err);
+        }
+    }
+
+    setArea(newArea) {
+        var that = this;
+        this.logIn(newArea, function(err, userName, password) {
+            if (err) {
+                that.AX25.write(`${EOL}${err}${EOL}${Prompt}`);
+            } else {
+                that.login = {userName: userName, password: password};
+                that.openPOP(function(err) {
+                    if (err) {
+                        that.AX25.write(`${EOL}${err}${EOL}`);
+                    }
+                    that.AX25.write(`${Prompt}`);
+                });
+            }
+        });
     }
 
     isMyArea() {
@@ -386,36 +429,16 @@ class CLI extends EventEmitter {
             break;
         case 'a':
         case 'area':
-            this.setArea(parts[1]);
+            this.closePOP(function() {
+                that.setArea(parts[1]);
+            });
             return;
         case 'l':  // list
         case 'la': // list all
         case 'lb': // list bulletins
         case 'lm': // list mine
         case 'list':
-            var count = this.popCount;
-            that.AX25.write(`Mail area: ${this.login.userName}${EOL}`
-                            + `${count} messages  -  ${count} new${EOL}${EOL}`);
-            that.POP.list(function(err, sizes) {
-                if (err && !sizes) sizes = [];
-                var showMessage = function showMessage(m) {
-                    if (m > count) {
-                        that.AX25.write(`${EOL}${Prompt}`);
-                    } else {
-                        that.POP.top(m, 0, function(err, message) {
-                            if (err) {
-                                that.AX25.write(`POP top(${m}, 0) ${err}${EOL}`);
-                            } else {
-                                log.debug(`POP< %o`, message);
-                                that.AX25.write(summarize(m, sizes[m], message) + EOL);
-                            }
-                            showMessage(m + 1);    
-                        });
-                    }
-                };
-                that.AX25.write(summarize(0) + EOL);
-                showMessage(1);
-            });
+            this.listMessages();
             return;
         case 'r':
         case 'read':
@@ -453,16 +476,9 @@ class CLI extends EventEmitter {
             throw 'threw ' + line;
         case 'b':
         case 'bye':
-            if (this.POP) {
-                this.POP.quit(function(err) {
-                    if (err) {
-                        that.AX25.write(`${err}${EOL}`);
-                    }
-                    that.AX25.end(`Goodbye.${EOL}`);
-                });
-            } else {
+            this.closePOP(function() {
                 that.AX25.end(`Goodbye.${EOL}`);
-            }
+            });
             return;
         default:
             this.AX25.write(line + `?`);
