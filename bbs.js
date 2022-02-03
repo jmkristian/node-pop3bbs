@@ -87,10 +87,9 @@ function summarize(number, size, message) {
 }
 
 /** Command Line Interpreter */
-class CLI extends EventEmitter {
+class CLI {
 
     constructor(connection) {
-        super();
         this.AX25 = connection;
         this.objectID = this.constructor.name + '#' + ++serialNumber + ' ' + this.AX25.theirCall;
         this.buffer = Buffer.alloc(0);
@@ -105,7 +104,6 @@ class CLI extends EventEmitter {
         this.AX25.on('close', function() {
             log.info('AX.25 closed');
             if (this.POP) this.POP.disconnect();
-            that.emit('close');
         });
         this.AX25.on('data', function(buffer) {
             try {
