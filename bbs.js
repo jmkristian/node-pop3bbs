@@ -11,8 +11,13 @@ const log = Config.logger;
 const EOL = '\r'; // Seems to be standard in the BBS world.
 const CR = '\r'.charCodeAt(0);
 const LF = '\n'.charCodeAt(0);
-const EM = 25; // end of medium
-const NUL = 0; // abort
+const CtrlA = 0;
+const endOfLineMarkers = ['\r\n', '\r', '\n'].map(Buffer.from);
+const endOfMessageMarkers = [
+    '/EX',
+    '\x19', // ^Z EM end of medium
+    '\x00', // ^A NUL
+].map(Buffer.from);
 const MonthNames = [
     'Jan',
     'Feb',
@@ -91,18 +96,18 @@ class CLI {
 
     constructor(connection) {
         this.AX25 = connection;
-        this.objectID = this.constructor.name + '#' + ++serialNumber + ' ' + this.AX25.theirCall;
         this.buffer = Buffer.alloc(0);
-        this.lookingAt = 0;
-        this.lookingFor = 'line';
-        this.lookingForLF = false;
+        this.log = log.child({
+            CLI: ++serialNumber,
+            caller: this.AX25.theirCall,
+        });
+        this.log.info('AX.25 connection');
         var that = this;
-        log.info('AX.25 connection from %s', this.AX25.theirCall);
         this.AX25.on('error', function(err) {
-            log.warn(err, 'AX.25 error');
+            that.log.warn(err, 'AX.25 error');
         });
         this.AX25.on('close', function() {
-            log.info('AX.25 closed');
+            that.log.info('AX.25 closed');
             if (this.POP) this.POP.disconnect();
         });
         this.AX25.on('data', function(buffer) {
@@ -132,96 +137,79 @@ class CLI {
         }
     }
 
+    /** If buf[end - 1] is the last byte of one of the markers,
+        return the index of the first byte of that marker;
+        otherwise return -1. The markers must be ASCII.
+    */
+    findBefore(end, buf, markers) {
+        var found = markers.find(function(marker) {
+            return (end >= marker.length)
+                && (buf.subarray(end - marker.length, end).equals(marker));
+        });
+        if (!found) return -1;
+        // this.log.trace('found %j at %d', found.toString('binary'), end - found.length);
+        return end - found.length;
+    }
+
     parse(buffer) {
         if (!buffer || buffer.length <= 0) return;
-        var buf = Buffer.alloc(this.buffer.length + buffer.length);
+        // this.log.trace('parse %o %s', this.lookingFor, AGW.toDataSummary(buffer));
+        // Concatenate this.buffer + buffer:
+        var next = this.buffer.length;
+        var buf = Buffer.alloc(next + buffer.length);
         this.buffer.copy(buf, 0);
-        buffer.copy(buf, this.buffer.length);
-        while (buf && buf.length > 0) {
-            var end = 0;
-            var next = 0;
-            var b = this.lookingAt;
-            if (this.lookingForLF && buf[b] == LF) {
-                ++b; // skip the LF
+        buffer.copy(buf, next);
+        var start = 0;
+        while (start < buf.length) {
+            if (this.skipLF && buf[next] == LF) {
+                ++next; // skip the LF
+                if (start == next - 1) {
+                    start = next;
+                }
             }
-            this.lookingForLF = false;
+            for (; next < buf.length; ++next) {
+                if (buf[next] == CR || buf[next] == LF) {
+                    break;
+                }
+            }
+            if (next >= buf.length) { // nothing found
+                break;
+            }
+            // buf[next] is a line break.
+            this.skipLF = (buf[next] == CR);
+            var end = next++;
             switch(this.lookingFor) {
-            case 'message': // ends with '/EX' or EM or NUL
-                for (; b < buf.length; ++b) {
-                    if (buf[b] == NUL) {
-                        end = -1; // don't call sendMessage
-                        next = b + 1;
-                        break;
-                    }
-                    if (buf[b] == CR || buf[b] == LF) {
-                        log.trace('CR or LF');
-                        if (b + 1 >= buf.length) {
-                            break; // wait to see what comes next
+            case 'message':
+                // Was the line break preceded by an end-of-message marker?
+                end = this.findBefore(end, buf, endOfMessageMarkers);
+                var aborted = (buf[end] == CtrlA);
+                if (end > start) {
+                    // Was the end-of-message marker preceded by a line break?
+                    end = this.findBefore(end, buf, endOfLineMarkers);
+                    if (end >= start) { // We found a message.
+                        var messageBody = Buffer.alloc(end - start);
+                        buf.copy(messageBody, 0, start, end);
+                        // this.log.trace('found message body %j', AGW.toDataSummary(messageBody));
+                        if (!aborted) {
+                            this.sendMessage(messageBody);
                         }
-                        if (buf[b] == CR && buf[b + 1] == LF) {
-                            log.trace('CRLF');
-                            ++b;
-                        }
-                        if (b + 2 >= buf.length) {
-                            break; // wait to see what comes next
-                        }
-                        log.trace('EOL ' + buf[b + 1]);
-                        if (buf[b + 1] == EM && (buf[b + 2] == CR || buf[b + 2] == LF)) {
-                            end = b;
-                            next = b + 3;
-                            this.lookingForLF = (buf[b + 2] == CR);
-                            break;
-                        } else if (buf[b + 1] == '/'.charCodeAt(0)) {
-                            log.trace('EOL /');
-                            if (b + 4 >= buf.length) {
-                                break; // wait to see what comes next
-                            }
-                            var found = buf.toString('binary', b + 1, b + 5);
-                            log.trace(`EOL %s`, found);
-                            if (found == '/EX\r' || found == '/EX\n') {
-                                end = b;
-                                next = b + 5;
-                                this.lookingForLF = (buf[b + 4] == CR);
-                                break;
-                            }
-                        }
+                        this.lookingFor = null;
+                        start = next;
                     }
                 }
                 break;
-            default: // a line, terminated by \r or \r\n
-                for (; b < buf.length; ++b) {
-                    if (buf[b] == CR) {
-                        end = b;
-                        next = b + 1;
-                        this.lookingForLF = true;
-                        break;
-                    } else if (buf[b] == LF) {
-                        end = b;
-                        next = b + 1;
-                        break;
-                    }
-                }
-            }
-            if (next <= 0) {
-                this.buffer = buf;
-                this.lookingAt = b;
-                break; // wait to see what comes next
-            }
-            this.buffer = Buffer.alloc(buf.length - next);
-            buf.copy(this.buffer, 0, next);
-            this.lookingAt = 0;
-            if (this.lookingFor == 'message') {
-                this.lookingFor = null;
-                if (end >= 0) {
-                    var message = Buffer.alloc(end);
-                    buf.copy(message, 0, 0, end);
-                    this.sendMessage(message);
-                }
-            } else {
-                var line = buf.toString('utf-8', 0, end);
+            default: // We found a line.
+                var line = buf.toString('utf-8', start, end);
                 this.parseLine(line);
+                start = next;
             }
-            buf = this.buffer;
+        }
+        // Store the remainder of buf and wait for more data.
+        if (start == 0) {
+            this.buffer = buf;
+        } else {
+            this.buffer = Buffer.alloc(buf.length - start);
+            buf.copy(this.buffer, 0, start);
         }
     }
 
@@ -240,7 +228,7 @@ class CLI {
                 this.lookingFor = 'message';
             }
         } catch(err) {
-            log.warn(err);
+            this.log.warn(err);
             this.AX25.write(`${err}${EOL}`);
         }
     }
@@ -266,7 +254,7 @@ class CLI {
                 ldap.unbind();
                 next(err, userName, password);
             };
-            log.debug('LDAP> bind %s', Config.LDAP.bindDN);
+            this.log.debug('LDAP> bind %s', Config.LDAP.bindDN);
             ldap.bind(
                 Config.LDAP.bindDN, Config.LDAP.password
             ).then(function() {
@@ -276,10 +264,10 @@ class CLI {
                     attributes: [userNameAttribute, passwordAttribute],
                     sizeLimit: 1,
                 };
-                log.debug('LDAP> search %o', options);
+                that.log.debug('LDAP> search %o', options);
                 return ldap.searchReturnAll(Config.LDAP.baseDN, options);
             }).then(function(results) {
-                log.debug('LDAP< %o', results);
+                that.log.debug('LDAP< %o', results);
                 if (results.entries && results.entries.length > 0) {
                     var entry = results.entries[0];
                     finish(null, entry[userNameAttribute], entry[passwordAttribute]);
@@ -287,11 +275,11 @@ class CLI {
                     finish(`${areaName} isn't in the directory.`);
                 }
             }).catch(function (err) {
-                log.warn(err, 'LDAP');
+                that.log.warn(err, 'LDAP');
                 finish(`LDAP ${err}`);
             });
         } catch(err) {
-            log.warn(err, 'LDAP');
+            this.log.warn(err, 'LDAP');
             next(`LDAP ${err}`);
         }
     }
@@ -305,7 +293,7 @@ class CLI {
             password: this.login.password,
             mailparser: true,
         };
-        log.debug(`POP> %o`, options);
+        this.log.debug(`POP> %o`, options);
         try {
             var that = this;
             this.POP = new POP.Client(options);
@@ -329,7 +317,7 @@ class CLI {
                 }
             });
         } catch(err) {
-            log.warn(err, 'POP');
+            this.log.warn(err, 'POP');
             next(`POP threw ${err}`);
         }
     }
@@ -348,9 +336,10 @@ class CLI {
     }
 
     listMessages() {
+        var that = this;
         var finish = function(err) {
             if (err) {
-                log.warn(err, 'POP');
+                that.log.warn(err, 'POP');
                 that.AX25.write(`POP ${err}${EOL}`);
             }
             that.AX25.write(`${EOL}${Prompt}`);
@@ -374,7 +363,7 @@ class CLI {
                             if (err) {
                                 that.AX25.write(`POP top(${m}, 0) ${err}${EOL}`);
                             } else {
-                                log.debug(`POP< %o`, message);
+                                that.log.debug(`POP< %o`, message);
                                 that.AX25.write(summarize(m, sizes[m], message) + EOL);
                             }
                             showMessage(m + 1);    
@@ -416,7 +405,7 @@ class CLI {
     }
 
     executeCommand(line) {
-        log.info('execute %s', line);
+        this.log.info('execute %s', line);
         var that = this;
         var parts = line.split(/\s+/);
         switch(parts[0].toLowerCase()) {
@@ -490,7 +479,7 @@ class CLI {
             numbers.push(parseInt(s));
             // I tried doing this with Array.map, and failed.
         });
-        log.debug('readMessages %o', numbers);
+        this.log.debug('readMessages %o', numbers);
         var that = this;
         this.POP.retrieve(numbers, function(err, messages) {
             if (err) throw err;
@@ -523,7 +512,7 @@ class CLI {
                    .replace(/(\r\(#\d+\) >)\r/g, '$1 \r')
                 */
                 ;
-                log.debug('%o', body);
+                that.log.debug('%o', body);
                 that.AX25.write(headers + EOL + body + (body.endsWith(EOL) ? '' : EOL));
             });
             that.AX25.write(Prompt);
@@ -546,7 +535,6 @@ class CLI {
         var myAddress = this.qualifyEmailAddress(this.login.userName);
         var message = this.message;
         this.message = null;
-        this.lookingFor = null;
         try {
             var smtp = SMTP.createTransport({
                 host: Config.SMTP.host,
@@ -575,18 +563,18 @@ class CLI {
             if (message.headers) {
                 m.headers = message.headers;
             }
-            log.info('SMTP> %o, body.length: %d', m, body.length);
+            this.log.info('SMTP> %o, body.length: %d', m, body.length);
             m.text = body.toString('utf-8');
             smtp.sendMail(m, function(err, info) {
                 if (err) {
                     that.AX25.write(`${err}${EOL}${Prompt}`);
                 } else {
-                    log.info(`SMTP< %o`, info);
+                    that.log.info(`SMTP< %o`, info);
                     that.AX25.write(`Msg queued${EOL}${Prompt}`);
                 }
             });
         } catch(err) {
-            log.warn(err, 'SMTP');
+            this.log.warn(err, 'SMTP');
             this.AX25.write(`SMTP threw ${err}${EOL}${Prompt}`);
         }
     }
@@ -594,11 +582,11 @@ class CLI {
 
 var server = new AGW.Server(Config);
 server.on('error', function(err) {
-    log.warn(err, 'AGW error');
+    this.log.warn(err, 'AGW error');
 });
 server.on('connection', function(c) {
     var cli = new CLI(c);
 });
 server.listen({callTo: Config.AGWPE.myCallSigns}, function(info) {
-    log.info('AGW listening %o', info);
+    this.log.info('AGW listening %o', info);
 });
