@@ -877,6 +877,9 @@ class Connection extends Stream.Duplex {
 /** Similar to net.Server, but for AX.25 connections.
     Each 'connection' event provides a Duplex stream
     for exchanging data via one AX.25 connection.
+    The remote call sign is connection.theirCall.
+    To disconnect, call connection.end(). The connection
+    emits a 'close' event when AX.25 is disconnected.
 */
 class Server extends EventEmitter {
 
@@ -967,3 +970,4 @@ class Server extends EventEmitter {
 exports.Reader = AGWReader;
 exports.Writer = AGWWriter;
 exports.Server = Server;
+exports.toDataSummary = getDataSummary;
