@@ -3,7 +3,7 @@
 const AGW = require('./agwapi');
 const Config = require('./config').readFile(process.argv[2] || 'config.ini');
 const EventEmitter = require('events');
-const LDAP = require('ldapjs');
+const LDAP = require('ldapjs-promise');
 const POP = require('yapople');
 const SMTP = require('nodemailer');
 
@@ -84,22 +84,6 @@ function summarize(number, size, message) {
     } catch(err) {
         return '  N' + column(5, number) + ' ' + err;
     }
-}
-
-function getAttributes(entry) {
-    var attributes = {};
-    try {
-        if (entry && entry.attributes) {
-            entry.attributes.forEach(function(a) {
-                attributes[a.type] = a._vals.map(function(value) {
-                    return ((typeof value) == 'string') ? value : value.toString('utf-8');
-                });
-            });
-        }
-    } catch(err) {
-        log.warn(`%o from getAttributes `, attributes);
-    }
-    return attributes;
 }
 
 /** Command Line Interpreter */
@@ -274,6 +258,9 @@ class CLI extends EventEmitter {
         var area = areaName.toLowerCase();
         var that = this;
         try {
+            var areaNameAttribute = Config.LDAP.callSignAttribute || Config.LDAP.userIdAttribute;
+            var userNameAttribute = Config.LDAP.userIdAttribute;
+            var passwordAttribute = Config.LDAP.passwordAttribute;
             var ldap = LDAP.createClient({
                 url: Config.LDAP.URL,
             });
@@ -281,66 +268,29 @@ class CLI extends EventEmitter {
                 ldap.unbind();
                 next(err, userName, password);
             };
-            ['error', 'connectRefused', 'connectError', 'resultError'].forEach(function(event) {
-                ldap.on(event, function(info) {
-                    log.warn('LDAP< $s %o', event, info);
-                    finish(`LDAP ${event} ${info || ""}`);
-                });
-            });
-            log.debug('LDAP> bind');
-            ldap.bind(Config.LDAP.bindDN, Config.LDAP.password, function(err) {
-                if (err) {
-                    log.warn(err, `LDAP< bind`);
-                    finish(`LDAP ${err}`);
+            log.debug('LDAP> bind %s', Config.LDAP.bindDN);
+            ldap.bind(
+                Config.LDAP.bindDN, Config.LDAP.password
+            ).then(function() {
+                var options = {
+                    scope: 'sub',
+                    filter: `${areaNameAttribute}=${area}`,
+                    attributes: [userNameAttribute, passwordAttribute],
+                    sizeLimit: 1,
+                };
+                log.debug('LDAP> search %o', options);
+                return ldap.searchReturnAll(Config.LDAP.baseDN, options);
+            }).then(function(results) {
+                log.debug('LDAP< %o', results);
+                if (results.entries && results.entries.length > 0) {
+                    var entry = results.entries[0];
+                    finish(null, entry[userNameAttribute], entry[passwordAttribute]);
                 } else {
-                    var areaNameAttribute = Config.LDAP.callSignAttribute || Config.LDAP.userIdAttribute;
-                    var userNameAttribute = Config.LDAP.userIdAttribute;
-                    var passwordAttribute = Config.LDAP.passwordAttribute;
-                    ldap.search(Config.LDAP.baseDN, {
-                        scope: 'sub',
-                        filter: `${areaNameAttribute}=${area}`,
-                        attributes: [userNameAttribute, passwordAttribute],
-                        sizeLimit: 1,
-                    }, function(err, results) {
-                        if (err) {
-                            log.warn(err, `LDAP< search`);
-                            finish(`LDAP ${err}`);
-                        } else {
-                            var firstEntry = null;
-                            results.on('error', function(err) {
-                                log.warn(err, 'LDAP< searchError %s', err.message);
-                                finish(`LDAP error ${err.message}`);
-                            });
-                            results.on('searchEntry', function(entry) {
-                                var attrs = getAttributes(entry);
-                                log.debug('LDAP< %o', {
-                                    objectName: entry.objectName,
-                                    attributes: attrs,
-                                });
-                                if (!firstEntry) {
-                                    firstEntry = entry;
-                                    var userName = (attrs[userNameAttribute] &&
-                                                    attrs[userNameAttribute][0]) || '';
-                                    var password = (attrs[passwordAttribute] &&
-                                                    attrs[passwordAttribute][0]) || '';
-                                    finish(null, userName, password);
-                                }
-                            });
-                            results.on('end', function(result) {
-                                if (!firstEntry) {
-                                    log.warn(`LDAP< searchEnd %o`, {
-                                        status: result.status,
-                                        matchedDN: result.matchedDN,
-                                        errorMessage: result.errorMessage || null,
-                                        sentEntries: result.sentEntries,
-                                        attributes: getAttributes(result),
-                                    });
-                                    finish(`${areaName} is not in the directory.`);
-                                }
-                            });
-                        }
-                    });
+                    finish(`${areaName} isn't in the directory.`);
                 }
+            }).catch(function (err) {
+                log.warn(err, 'LDAP');
+                finish(`LDAP ${err}`);
             });
         } catch(err) {
             log.warn(err, 'LDAP');
