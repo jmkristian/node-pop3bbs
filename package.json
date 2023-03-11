@@ -5,6 +5,7 @@
   "main": "bbs.js",
   "dependencies": {
     "bunyan": "^1.8.15",
+    "html-to-text": "^6.0.0",
     "ini": "^2.0.0",
     "ldapjs": "^2.3.1",
     "ldapjs-promise": "^1.0.6",

@@ -3,6 +3,7 @@
 const AGW = require('./agwapi');
 const Config = require('./config').readFile(process.argv[2] || 'config.ini');
 const EventEmitter = require('events');
+const HtmlToText = require('html-to-text');
 const LDAP = require('ldapjs-promise');
 const POP = require('yapople');
 const SMTP = require('nodemailer');
@@ -503,8 +504,13 @@ class CLI {
                    }
                    });
                 */
-                var body = (message.text || message.html || '')
-                    .replace(/\r?\n/g, EOL) // BBS-style line endings
+                var body = message.text;
+                if (!body && message.html) {
+                    body = HtmlToText.htmlToText(message.html, {
+                        wordwrap: 80,
+                    });
+                }
+                body = body.replace(/\r?\n/g, EOL) // BBS-style line endings
                 /* Sadly, Outpost will ignore lines in the body similar to Prompt.
                    It would be nice to work around this. This doesn't work:
                    // Append a space to any line in the message similar to Prompt:
@@ -512,7 +518,7 @@ class CLI {
                    .replace(/(\r\(#\d+\) >)\r/g, '$1 \r')
                 */
                 ;
-                that.log.debug('%o', body);
+                if (that.log.debug()) that.log.debug('POP< %j', body);
                 that.AX25.write(headers + EOL + body + (body.endsWith(EOL) ? '' : EOL));
             });
             that.AX25.write(Prompt);
