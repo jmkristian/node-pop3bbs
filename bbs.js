@@ -449,7 +449,6 @@ class CLI {
             this.killMessage(parseInt(parts[1]));
             return;
         case 'sb': // send bulletin
-            if (!this.isMyArea()) break;
             this.message = {
                 to: line.replace(/^[^\s]*\s+/, ''),
                 headers: {'X-BBS-Msg-Type': 'B'},
@@ -457,14 +456,12 @@ class CLI {
             this.AX25.write(`Subject:${EOL}`);
             return;
         case 'sp': // send private
-            if (!this.isMyArea()) break;
             this.message = {
                 to: line.replace(/^[^\s]*\s+/, ''),
             };
             this.AX25.write(`Subject:${EOL}`);
             return;
         case 'sc': // send with CC
-            if (!this.isMyArea()) break;
             this.message = {
                 to: line.replace(/^[^\s]*\s+/, ''),
                 cc: '',

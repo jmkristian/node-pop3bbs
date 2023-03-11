@@ -34,7 +34,7 @@ To run the BBS:
 A user's email address is their call sign plus the POP emailDomain in config.ini.
 
 A user may read other mailboxes using the BBS 'AREA' command, but
-may not delete mail from them, nor send email while reading them.
+may not delete mail from them.
 This is useful for publishing bulletins to be read by all users.
 Outpost can be configured to automatically download these bulletins,
 and not download a bulletin repeatedly.
