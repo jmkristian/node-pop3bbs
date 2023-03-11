@@ -121,11 +121,17 @@ class CLI {
         if (!/[a-z]+\d[a-z]+/.test(this.AX25.theirCall.toLowerCase())) {
             that.AX25.end(`"${that.AX25.theirCall}" isn't a call sign.${EOL}`);
         } else {
-            this.logIn(this.AX25.theirCall, function(err, userName, password) {
+            this.logIn(this.AX25.theirCall, function afterLogIn(err, userName, password) {
                 if (err) {
                     that.AX25.write(`${err}${EOL}${Prompt}`);
                 } else {
-                    that.login = {userName: userName, password: password};
+                    that.login = {
+                        userName: userName,
+                        password: password,
+                        POP: {userName: userName,
+                              password: password,
+                             },
+                    };
                     that.openPOP(function(err) {
                         if (err) {
                             that.AX25.write(`${err}`);
@@ -250,7 +256,7 @@ class CLI {
             var ldap = LDAP.createClient({
                 url: Config.LDAP.URL,
             });
-            var finish = function(err, userName, password) {
+            var finish = function afterSearchLDAP(err, userName, password) {
                 ldap.unbind();
                 next(err, userName, password);
             };
@@ -289,8 +295,8 @@ class CLI {
             host: Config.POP.host,
             port: Config.POP.port,
             tls: false,
-            username: this.login.userName,
-            password: this.login.password,
+            username: this.login.POP.userName,
+            password: this.login.POP.password,
             mailparser: true,
         };
         this.log.debug(`POP> %o`, options);
@@ -380,11 +386,17 @@ class CLI {
 
     setArea(newArea) {
         var that = this;
-        this.logIn(newArea, function(err, userName, password) {
+        this.logIn(newArea, function afterSetArea(err, userName, password) {
             if (err) {
                 that.AX25.write(`${EOL}${err}${EOL}${Prompt}`);
             } else {
-                that.login = {userName: userName, password: password};
+                that.login = {
+                    userName: that.login.userName, // no change
+                    password: that.login.password, // no change
+                    POP: {userName: userName,
+                          password: password,
+                         },
+                };
                 that.openPOP(function(err) {
                     if (err) {
                         that.AX25.write(`${EOL}${err}${EOL}`);
