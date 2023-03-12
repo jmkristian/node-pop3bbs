@@ -97,6 +97,9 @@ function summarize(number, size, message) {
         return 'St.  #  TO            FROM     DATE   SIZE SUBJECT';
     }
     try {
+        if (message == null) { // deleted
+            return ' DN' + column(4, number);
+        }
         var date = message.date
             ? (column(3, MonthNames[message.date.getMonth()])
                + column(3, message.date.getDate()))
@@ -133,10 +136,7 @@ class Session {
         });
         this.client.on('close', function afterClose() {
             that.log.info('end');
-            if (that.POP.server) {
-                that.POP.server.disconnect();
-                delete that.POP.server;
-            }
+            that.closePOP(); // asynchronously
         });
         this.client.on('data', function(buffer) {
             try {
@@ -325,41 +325,44 @@ class Session {
     }
 
     openPOP(next) {
-        var options = {
-            host: Config.POP.host,
-            port: Config.POP.port,
-            tls: false,
-            username: this.POP.userName,
-            password: this.POP.password,
-            mailparser: true,
-        };
-        this.log.debug(`POP> %o`, options);
-        try {
-            var that = this;
-            this.POP.server = new POP.Client(options);
-            this.POP.server.connect(function(err) {
-                if (err) {
-                    next(`POP connect: ${err}`);
-                } else {
-                    that.POP.server.count(function(err, count) {
-                        that.popCount = count;
-                        if (err) {
-                            next(`POP count: ${err}`);
-                        } else {
-                            that.client.write(
-                                ((count <= 0) ? 'You have 0 messages.'
-                                 : (count == 1) ? 'You have 1 message  -  1 new.'
-                                 : `You have ${count} messages  -  ${count} new.`)
-                                    + `${EOL}`);
-                            next();
-                        }
-                    });
-                }
-            });
-        } catch(err) {
-            this.log.warn(err, 'POP');
-            next(`POP threw ${err}`);
-        }
+        var that = this;
+        that.closePOP(function afterClose() {
+            try {
+                var options = {
+                    host: Config.POP.host,
+                    port: Config.POP.port,
+                    tls: false,
+                    username: that.POP.userName,
+                    password: that.POP.password,
+                    mailparser: true,
+                };
+                that.log.debug(`POP> %o`, options);
+                that.POP.deleted = {};
+                that.POP.server = new POP.Client(options);
+                that.POP.server.connect(function(err) {
+                    if (err) {
+                        next(`POP connect: ${err}`);
+                    } else {
+                        that.POP.server.count(function(err, count) {
+                            that.popCount = count;
+                            if (err) {
+                                next(`POP count: ${err}`);
+                            } else {
+                                that.client.write(
+                                    ((count <= 0) ? 'You have 0 messages.'
+                                     : (count == 1) ? 'You have 1 message  -  1 new.'
+                                     : `You have ${count} messages  -  ${count} new.`)
+                                        + `${EOL}`);
+                                next();
+                            }
+                        });
+                    }
+                });
+            } catch(err) {
+                that.log.warn(err, 'POP connect');
+                next(`POP ${err}`);
+            }
+        });
     }
 
     closePOP(next) {
@@ -367,12 +370,16 @@ class Session {
         if (that.POP.server) {
             that.POP.server.quit(function(err) {
                 if (err) {
-                    that.client.write(`POP ${err}${EOL}`);
+                    that.client.write(`POP quit ${err}${EOL}`);
                 }
-                next();
+                that.POP.server.disconnect(); // asynchronously
+                delete that.POP.server;
+                delete that.POP.deleted;
+                if (next) next();
             });
         } else {
-            next();
+            delete that.POP.deleted;
+            if (next) next();
         }
     }
 
@@ -399,10 +406,14 @@ class Session {
                 var showMessage = function showMessage(m) {
                     if (m > count) {
                         finish();
+                    } else if (that.POP.deleted[`${m}`]) {
+                        that.client.write(summarize(m) + EOL);
+                        showMessage(m + 1);    
                     } else {
                         that.POP.server.top(m, 0, function(err, message) {
                             if (err) {
-                                that.client.write(`POP top(${m}, 0) ${err}${EOL}`);
+                                that.log.debug(`POP< ${err}`);
+                                that.client.write(`Message ${m} ${err}${EOL}`);
                             } else {
                                 that.log.debug(`POP< %o`, message);
                                 that.client.write(summarize(m, sizes[m], message) + EOL);
@@ -420,21 +431,25 @@ class Session {
     }
 
     setArea(newArea) {
-        var that = this;
-        this.logIn(newArea, function afterSetArea(err, userName, password) {
-            if (err) {
-                that.client.write(`${EOL}${err}${EOL}${Prompt}`);
-            } else {
-                that.POP.userName = userName;
-                that.POP.password = password;
-                that.openPOP(function(err) {
-                    if (err) {
-                        that.client.write(`${EOL}${err}${EOL}`);
-                    }
-                    that.client.write(`${Prompt}`);
-                });
-            }
-        });
+        if (newArea == null) {
+            this.client.write(`Mail area: ${this.area}${EOL}${Prompt}`);
+        } else {
+            var that = this;
+            this.logIn(newArea, function afterSetArea(err, userName, password) {
+                if (err) {
+                    that.client.write(`${EOL}${err}${EOL}${Prompt}`);
+                } else {
+                    that.POP.userName = userName;
+                    that.POP.password = password;
+                    that.openPOP(function(err) {
+                        if (err) {
+                            that.client.write(`${EOL}${err}${EOL}`);
+                        }
+                        that.client.write(`${Prompt}`);
+                    });
+                }
+            });
+        }
     }
 
     isMyArea() {
@@ -519,54 +534,69 @@ class Session {
         });
         this.log.debug('readMessages %o', numbers);
         var that = this;
-        this.POP.server.retrieve(numbers, function(err, messages) {
-            if (err) throw err;
-            messages.map(function(message, number) {
-                var headers = `Message #` + number + EOL;
-                if (message.headers.date) {
-                    headers += 'Date: ' + message.headers.date + EOL;
+        try {
+            this.POP.server.retrieve(numbers, function(err, messages) {
+                if (err) {
+                    that.log.debug(`POP< %o`, err);
+                    that.client.write(`${err}${EOL}`);
                 } else {
-                    // Outpost will discard a message that has no Date header.
-                    // To prevent this, give it a fake date:
-                    headers += 'Date: Mon, 1 Jan 1970 00:00:00 +0000' + EOL;
+                    messages.map(function(message, number) {
+                        var headers = `Message #` + number + EOL;
+                        if (message.headers.date) {
+                            headers += 'Date: ' + message.headers.date + EOL;
+                        } else {
+                            // Outpost will discard a message that has no Date header.
+                            // To prevent this, give it a fake date:
+                            headers += 'Date: Mon, 1 Jan 1970 00:00:00 +0000' + EOL;
+                        }
+                        headers += getAddressHeader(message, 'From')
+                            + getAddressHeader(message, 'To')
+                            + getAddressHeader(message, 'Cc')
+                            + 'Subject: ' + (message.subject || '') + EOL;
+                        /* Outpost can't handle MIME headers.
+                           ['content-type', 'content-transfer-encoding'].map(function(name) {
+                           if (message.headers[name]) {
+                           headers += name + ': ' + message.headers[name] + EOL;
+                           }
+                           });
+                        */
+                        var body = (message.text || message.html || '')
+                            .replace(/\r?\n/g, EOL) // BBS-style line endings
+                        /* Sadly, Outpost will ignore lines in the body similar to Prompt.
+                           It would be nice to work around this. This doesn't work:
+                           // Append a space to any line in the message similar to Prompt:
+                           .replace(/^(\(#\d+\) >)\r/, '$1 \r')
+                           .replace(/(\r\(#\d+\) >)\r/g, '$1 \r')
+                        */
+                        ;
+                        that.log.debug('%o', body);
+                        that.client.write(headers + EOL + body + (body.endsWith(EOL) ? '' : EOL));
+                    });
                 }
-                headers += getAddressHeader(message, 'From')
-                    + getAddressHeader(message, 'To')
-                    + getAddressHeader(message, 'Cc')
-                    + 'Subject: ' + (message.subject || '') + EOL;
-                /* Outpost can't handle MIME headers.
-                   ['content-type', 'content-transfer-encoding'].map(function(name) {
-                   if (message.headers[name]) {
-                   headers += name + ': ' + message.headers[name] + EOL;
-                   }
-                   });
-                */
-                var body = (message.text || message.html || '')
-                    .replace(/\r?\n/g, EOL) // BBS-style line endings
-                /* Sadly, Outpost will ignore lines in the body similar to Prompt.
-                   It would be nice to work around this. This doesn't work:
-                   // Append a space to any line in the message similar to Prompt:
-                   .replace(/^(\(#\d+\) >)\r/, '$1 \r')
-                   .replace(/(\r\(#\d+\) >)\r/g, '$1 \r')
-                */
-                ;
-                that.log.debug('%o', body);
-                that.client.write(headers + EOL + body + (body.endsWith(EOL) ? '' : EOL));
+                that.client.write(Prompt);
             });
-            that.client.write(Prompt);
-        });
+        } catch(err) {
+            this.log.warn(err, 'POP retrieve');
+            this.client.write(`${err}${EOL}${Prompt}`);
+        }
     }
 
     killMessage(number) {
         var that = this;
-        this.POP.server.delete(number, function(err, messages) {
-            if (err) {
-                that.client.write(`POP ${err}`);
-            } else {
-                that.client.write(`Msg ${number} killed.`);
-            }
-            that.client.write(`${EOL}${Prompt}`);
-        });
+        try {
+            this.POP.server.delete(number, function(err, messages) {
+                if (err) {
+                    that.client.write(err);
+                } else {
+                    that.client.write(`Msg ${number} killed.`);
+                    that.POP.deleted[`${number}`] = true;
+                }
+                that.client.write(`${EOL}${Prompt}`);
+            });
+        } catch(err) {
+            this.log.warn(err, 'POP delete');
+            this.client.write(`${err}${EOL}${Prompt}`);
+        }
     }
 
     sendMessage(body) {
