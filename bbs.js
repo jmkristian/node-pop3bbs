@@ -92,51 +92,55 @@ function summarize(number, size, message) {
 }
 
 /** Command Line Interpreter */
-class CLI {
+class Session {
 
-    constructor(connection) {
-        this.AX25 = connection;
-        this.buffer = Buffer.alloc(0);
+    constructor(client, userName) {
         this.log = log.child({
-            CLI: ++serialNumber,
-            caller: this.AX25.theirCall,
+            session: ++serialNumber,
+            user: userName,
         });
-        this.log.info('AX.25 connection');
+        this.log.info('begin');
+        this.client = client;
+        this.userName = userName || '';
+        this.area = this.userName;
+        this.POP = {};
+        this.SMTP = {};
+        this.buffer = Buffer.alloc(0);
         var that = this;
-        this.AX25.on('error', function(err) {
-            that.log.warn(err, 'AX.25 error');
+        this.client.on('error', function(err) {
+            that.log.warn(err, 'client');
         });
-        this.AX25.on('close', function() {
-            that.log.info('AX.25 closed');
-            if (this.POP) this.POP.disconnect();
+        this.client.on('close', function afterClose() {
+            that.log.info('end');
+            if (that.POP.server) {
+                that.POP.server.disconnect();
+                delete that.POP.server;
+            }
         });
-        this.AX25.on('data', function(buffer) {
+        this.client.on('data', function(buffer) {
             try {
                 that.parse(buffer);
             } catch(err) {
-                that.AX25.write('' + err + `${EOL}${Prompt}`);
+                that.client.write('' + err + `${EOL}${Prompt}`);
             }
         });
-        this.AX25.write(`[JNOS-2.0POP-B1FHIM$]${EOL}`);
-        if (!/[a-z]+\d[a-z]+/.test(this.AX25.theirCall.toLowerCase())) {
-            that.AX25.end(`"${that.AX25.theirCall}" isn't a call sign.${EOL}`);
+        this.client.write(`[JNOS-2.0POP-B1FHIM$]${EOL}`);
+        if (!/[a-z]+\d[a-z]+/.test(this.userName.toLowerCase())) {
+            this.client.end(`"${this.userName}" isn't a call sign.${EOL}`);
         } else {
-            this.logIn(this.AX25.theirCall, function afterLogIn(err, userName, password) {
+            this.logIn(this.userName, function afterLogIn(err, userName, password) {
                 if (err) {
-                    that.AX25.write(`${err}${EOL}${Prompt}`);
+                    that.client.write(`${err}${EOL}${Prompt}`);
                 } else {
-                    that.login = {
-                        userName: userName,
-                        password: password,
-                        POP: {userName: userName,
-                              password: password,
-                             },
-                    };
+                    that.SMTP.userName = userName;
+                    that.SMTP.password = password;
+                    that.POP.userName = userName;
+                    that.POP.password = password;
                     that.openPOP(function(err) {
                         if (err) {
-                            that.AX25.write(`${err}`);
+                            that.client.write(`${err}`);
                         }
-                        that.AX25.write(`${EOL}${Prompt}`);
+                        that.client.write(`${EOL}${Prompt}`);
                     });
                 }
             });
@@ -225,29 +229,28 @@ class CLI {
                 this.executeCommand(line);
             } else if (this.message.cc == '') {
                 this.message.cc = line.trim() || null;
-                this.AX25.write(`Subject:${EOL}`);
+                this.client.write(`Subject:${EOL}`);
             } else if (!this.message.subject) {
                 this.message.subject = line;
-                this.AX25.write('Enter message.'
+                this.client.write('Enter message.'
                                 + '  End with /EX or ^Z in first columnn'
                                 + ` (^A aborts):${EOL}`);
                 this.lookingFor = 'message';
             }
         } catch(err) {
             this.log.warn(err);
-            this.AX25.write(`${err}${EOL}`);
+            this.client.write(`${err}${EOL}`);
         }
     }
 
     qualifyEmailAddress(from) {
-        if (from.indexOf('@') >= 0) {
+        if (from && from.indexOf('@') >= 0) {
             return from;
         }
         return from + '@' + Config.POP.emailDomain;
     }
 
-    logIn(areaName, next) {
-        var area = areaName.toLowerCase();
+    logIn(area, next) {
         var that = this;
         try {
             var areaNameAttribute = Config.LDAP.callSignAttribute || Config.LDAP.userIdAttribute;
@@ -257,7 +260,7 @@ class CLI {
                 url: Config.LDAP.URL,
             });
             var finish = function afterSearchLDAP(err, userName, password) {
-                ldap.unbind();
+                ldap.unbind(); // asynchronously
                 next(err, userName, password);
             };
             this.log.debug('LDAP> bind %s', Config.LDAP.bindDN);
@@ -275,10 +278,11 @@ class CLI {
             }).then(function(results) {
                 that.log.debug('LDAP< %o', results);
                 if (results.entries && results.entries.length > 0) {
+                    that.area = area;
                     var entry = results.entries[0];
                     finish(null, entry[userNameAttribute], entry[passwordAttribute]);
                 } else {
-                    finish(`${areaName} isn't in the directory.`);
+                    finish(`${area} isn't in the directory.`);
                 }
             }).catch(function (err) {
                 that.log.warn(err, 'LDAP');
@@ -295,24 +299,24 @@ class CLI {
             host: Config.POP.host,
             port: Config.POP.port,
             tls: false,
-            username: this.login.POP.userName,
-            password: this.login.POP.password,
+            username: this.POP.userName,
+            password: this.POP.password,
             mailparser: true,
         };
         this.log.debug(`POP> %o`, options);
         try {
             var that = this;
-            this.POP = new POP.Client(options);
-            this.POP.connect(function(err) {
+            this.POP.server = new POP.Client(options);
+            this.POP.server.connect(function(err) {
                 if (err) {
                     next(`POP connect: ${err}`);
                 } else {
-                    that.POP.count(function(err, count) {
+                    that.POP.server.count(function(err, count) {
                         if (err) {
                             next(`POP count: ${err}`);
                         } else {
                             that.popCount = count;
-                            that.AX25.write(
+                            that.client.write(
                                 ((count <= 0) ? 'You have 0 messages.'
                                  : (count == 1) ? 'You have 1 message  -  1 new.'
                                  : `You have ${count} messages  -  ${count} new.`)
@@ -329,10 +333,11 @@ class CLI {
     }
 
     closePOP(next) {
-        if (this.POP) {
-            this.POP.quit(function(err) {
+        var that = this;
+        if (that.POP.server) {
+            that.POP.server.quit(function(err) {
                 if (err) {
-                    that.AX25.write(`${err}${EOL}`);
+                    that.client.write(`POP ${err}${EOL}`);
                 }
                 next();
             });
@@ -346,16 +351,16 @@ class CLI {
         var finish = function(err) {
             if (err) {
                 that.log.warn(err, 'POP');
-                that.AX25.write(`POP ${err}${EOL}`);
+                that.client.write(`POP ${err}${EOL}`);
             }
-            that.AX25.write(`${EOL}${Prompt}`);
+            that.client.write(`${EOL}${Prompt}`);
         }
         try {
             var count = this.popCount;
             var that = this;
-            this.AX25.write(`Mail area: ${this.login.userName}${EOL}`
+            this.client.write(`Mail area: ${this.area}${EOL}`
                             + `${count} messages  -  ${count} new${EOL}${EOL}`);
-            this.POP.list(function(err, sizes) {
+            this.POP.server.list(function(err, sizes) {
                 if (err) {
                     finish(err);
                     return;
@@ -365,18 +370,18 @@ class CLI {
                     if (m > count) {
                         finish();
                     } else {
-                        that.POP.top(m, 0, function(err, message) {
+                        that.POP.server.top(m, 0, function(err, message) {
                             if (err) {
-                                that.AX25.write(`POP top(${m}, 0) ${err}${EOL}`);
+                                that.client.write(`POP top(${m}, 0) ${err}${EOL}`);
                             } else {
                                 that.log.debug(`POP< %o`, message);
-                                that.AX25.write(summarize(m, sizes[m], message) + EOL);
+                                that.client.write(summarize(m, sizes[m], message) + EOL);
                             }
                             showMessage(m + 1);    
                         });
                     }
                 };
-                that.AX25.write(summarize(0) + EOL);
+                that.client.write(summarize(0) + EOL);
                 showMessage(1);
             });
         } catch(err) {
@@ -388,32 +393,26 @@ class CLI {
         var that = this;
         this.logIn(newArea, function afterSetArea(err, userName, password) {
             if (err) {
-                that.AX25.write(`${EOL}${err}${EOL}${Prompt}`);
+                that.client.write(`${EOL}${err}${EOL}${Prompt}`);
             } else {
-                that.login = {
-                    userName: that.login.userName, // no change
-                    password: that.login.password, // no change
-                    POP: {userName: userName,
-                          password: password,
-                         },
-                };
+                that.POP.userName = userName;
+                that.POP.password = password;
                 that.openPOP(function(err) {
                     if (err) {
-                        that.AX25.write(`${EOL}${err}${EOL}`);
+                        that.client.write(`${EOL}${err}${EOL}`);
                     }
-                    that.AX25.write(`${Prompt}`);
+                    that.client.write(`${Prompt}`);
                 });
             }
         });
     }
 
     isMyArea() {
-        if ((this.login.userName && this.login.userName.toLowerCase())
-            != this.AX25.theirCall.toLowerCase()) {
-            this.AX25.write(`Permission denied.`);
-            return false;
+        if (this.area.toLowerCase() == this.userName.toLowerCase()) {
+            return true;
         }
-        return true;
+        this.client.write(`Permission denied.`);
+        return false;
     }
 
     executeCommand(line) {
@@ -423,7 +422,7 @@ class CLI {
         switch(parts[0].toLowerCase()) {
         case 'xm':
             if (parts[1] != '0') {
-                this.AX25.write(`XM 0${EOL}`);
+                this.client.write(`XM 0${EOL}`);
             }
             break;
         case 'a':
@@ -453,33 +452,33 @@ class CLI {
                 to: line.replace(/^[^\s]*\s+/, ''),
                 headers: {'X-BBS-Msg-Type': 'B'},
             };
-            this.AX25.write(`Subject:${EOL}`);
+            this.client.write(`Subject:${EOL}`);
             return;
         case 'sp': // send private
             this.message = {
                 to: line.replace(/^[^\s]*\s+/, ''),
             };
-            this.AX25.write(`Subject:${EOL}`);
+            this.client.write(`Subject:${EOL}`);
             return;
         case 'sc': // send with CC
             this.message = {
                 to: line.replace(/^[^\s]*\s+/, ''),
                 cc: '',
             };
-            this.AX25.write(`CC:${EOL}`);
+            this.client.write(`CC:${EOL}`);
             return;
         case 'throw':
             throw 'threw ' + line;
         case 'b':
         case 'bye':
             this.closePOP(function() {
-                that.AX25.end(`Goodbye.${EOL}`);
+                that.client.end(`Goodbye.${EOL}`);
             });
             return;
         default:
-            this.AX25.write(line + `?`);
+            this.client.write(line + `?`);
         }
-        this.AX25.write(`${EOL}${Prompt}`);
+        this.client.write(`${EOL}${Prompt}`);
     }
 
     readMessages(strings) {
@@ -490,7 +489,7 @@ class CLI {
         });
         this.log.debug('readMessages %o', numbers);
         var that = this;
-        this.POP.retrieve(numbers, function(err, messages) {
+        this.POP.server.retrieve(numbers, function(err, messages) {
             if (err) throw err;
             messages.map(function(message, number) {
                 var headers = `Message #` + number + EOL;
@@ -522,26 +521,26 @@ class CLI {
                 */
                 ;
                 that.log.debug('%o', body);
-                that.AX25.write(headers + EOL + body + (body.endsWith(EOL) ? '' : EOL));
+                that.client.write(headers + EOL + body + (body.endsWith(EOL) ? '' : EOL));
             });
-            that.AX25.write(Prompt);
+            that.client.write(Prompt);
         });
     }
 
     killMessage(number) {
         var that = this;
-        this.POP.delete(number, function(err, messages) {
+        this.POP.server.delete(number, function(err, messages) {
             if (err) {
-                that.AX25.write(`POP ${err}`);
+                that.client.write(`POP ${err}`);
             } else {
-                that.AX25.write(`Msg ${number} killed.`);
+                that.client.write(`Msg ${number} killed.`);
             }
-            that.AX25.write(`${EOL}${Prompt}`);
+            that.client.write(`${EOL}${Prompt}`);
         });
     }
 
     sendMessage(body) {
-        var myAddress = this.qualifyEmailAddress(this.login.userName);
+        var myAddress = this.qualifyEmailAddress(this.SMTP.userName);
         var message = this.message;
         this.message = null;
         try {
@@ -551,7 +550,7 @@ class CLI {
                 secure: false,
                 auth: {
                     user: myAddress,
-                    pass: this.login.password,
+                    pass: this.SMTP.password,
                 },
             }, {
                 from: myAddress,
@@ -576,15 +575,15 @@ class CLI {
             m.text = body.toString('utf-8');
             smtp.sendMail(m, function(err, info) {
                 if (err) {
-                    that.AX25.write(`${err}${EOL}${Prompt}`);
+                    that.client.write(`${err}${EOL}${Prompt}`);
                 } else {
                     that.log.info(`SMTP< %o`, info);
-                    that.AX25.write(`Msg queued${EOL}${Prompt}`);
+                    that.client.write(`Msg queued${EOL}${Prompt}`);
                 }
             });
         } catch(err) {
             this.log.warn(err, 'SMTP');
-            this.AX25.write(`SMTP threw ${err}${EOL}${Prompt}`);
+            this.client.write(`SMTP threw ${err}${EOL}${Prompt}`);
         }
     }
 }
@@ -594,7 +593,8 @@ server.on('error', function(err) {
     this.log.warn(err, 'AGW error');
 });
 server.on('connection', function(c) {
-    var cli = new CLI(c);
+    log.debug('AGW connection');
+    var session = new Session(c, c.theirCall);
 });
 server.listen({callTo: Config.AGWPE.myCallSigns}, function(info) {
     this.log.info('AGW listening %o', info);
