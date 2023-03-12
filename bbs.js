@@ -32,6 +32,27 @@ const MonthNames = [
     'Nov',
     'Dec',
 ];
+const LDAPEventLevels = {
+    info: [
+        'error',
+        'resultError',
+        'setupError',
+    ],
+    debug: [
+        'connect',
+        'connectError',
+        'connectRefused',
+        'connectTimeout',
+        'socketTimeout',
+        'timeout',
+    ],
+    trace: [
+        'idle',
+        'end',
+        'close',
+        'destroy',
+    ],
+};
 
 const Prompt = `(#1) >${EOL}`;
 
@@ -252,18 +273,27 @@ class Session {
 
     logIn(area, next) {
         var that = this;
+        var ldapLog = that.log.child({method: 'logIn'});
         try {
             var areaNameAttribute = Config.LDAP.callSignAttribute || Config.LDAP.userIdAttribute;
             var userNameAttribute = Config.LDAP.userIdAttribute;
             var passwordAttribute = Config.LDAP.passwordAttribute;
             var ldap = LDAP.createClient({
                 url: Config.LDAP.URL,
+                log: ldapLog,
             });
             var finish = function afterSearchLDAP(err, userName, password) {
                 ldap.unbind(); // asynchronously
                 next(err, userName, password);
             };
-            this.log.debug('LDAP> bind %s', Config.LDAP.bindDN);
+            for (const level in LDAPEventLevels) {
+                LDAPEventLevels[level].forEach(function(event) {
+                    ldap.client.on(event, function(err) {
+                        ldapLog[level](err, `LDAP ${event}`);
+                    });
+                });
+            }
+            ldapLog.debug('LDAP> bind %s', Config.LDAP.bindDN);
             ldap.bind(
                 Config.LDAP.bindDN, Config.LDAP.password
             ).then(function() {
@@ -273,10 +303,10 @@ class Session {
                     attributes: [userNameAttribute, passwordAttribute],
                     sizeLimit: 1,
                 };
-                that.log.debug('LDAP> search %o', options);
+                ldapLog.debug('LDAP> search %o', options);
                 return ldap.searchReturnAll(Config.LDAP.baseDN, options);
             }).then(function(results) {
-                that.log.debug('LDAP< %o', results);
+                ldapLog.debug('LDAP< %o', results);
                 if (results.entries && results.entries.length > 0) {
                     that.area = area;
                     var entry = results.entries[0];
@@ -284,8 +314,8 @@ class Session {
                 } else {
                     finish(`${area} isn't in the directory.`);
                 }
-            }).catch(function (err) {
-                that.log.warn(err, 'LDAP');
+            }).catch(function ldapFailed(err) {
+                ldapLog.warn(err, 'LDAP');
                 finish(`LDAP ${err}`);
             });
         } catch(err) {
@@ -312,10 +342,10 @@ class Session {
                     next(`POP connect: ${err}`);
                 } else {
                     that.POP.server.count(function(err, count) {
+                        that.popCount = count;
                         if (err) {
                             next(`POP count: ${err}`);
                         } else {
-                            that.popCount = count;
                             that.client.write(
                                 ((count <= 0) ? 'You have 0 messages.'
                                  : (count == 1) ? 'You have 1 message  -  1 new.'
@@ -356,10 +386,10 @@ class Session {
             that.client.write(`${EOL}${Prompt}`);
         }
         try {
-            var count = this.popCount;
+            var count = this.popCount || 0;
             var that = this;
             this.client.write(`Mail area: ${this.area}${EOL}`
-                            + `${count} messages  -  ${count} new${EOL}${EOL}`);
+                              + `${count} messages  -  ${count} new${EOL}${EOL}`);
             this.POP.server.list(function(err, sizes) {
                 if (err) {
                     finish(err);
@@ -588,14 +618,14 @@ class Session {
     }
 }
 
-var server = new AGW.Server(Config);
-server.on('error', function(err) {
-    this.log.warn(err, 'AGW error');
+var agw = new AGW.Server(Config);
+agw.on('error', function(err) {
+    log.warn(err, 'AGW error');
 });
-server.on('connection', function(c) {
+agw.on('connection', function(c) {
     log.debug('AGW connection');
     var session = new Session(c, c.theirCall);
 });
-server.listen({callTo: Config.AGWPE.myCallSigns}, function(info) {
+agw.listen({callTo: Config.AGWPE.myCallSigns}, function(info) {
     this.log.info('AGW listening %o', info);
 });
