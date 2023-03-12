@@ -272,15 +272,15 @@ class Session {
     }
 
     logIn(area, next) {
+        var log = this.log.child({method: 'logIn'});
         var that = this;
-        var ldapLog = that.log.child({method: 'logIn'});
         try {
             var areaNameAttribute = Config.LDAP.callSignAttribute || Config.LDAP.userIdAttribute;
             var userNameAttribute = Config.LDAP.userIdAttribute;
             var passwordAttribute = Config.LDAP.passwordAttribute;
             var ldap = LDAP.createClient({
                 url: Config.LDAP.URL,
-                log: ldapLog,
+                log: log,
             });
             var finish = function afterSearchLDAP(err, userName, password) {
                 ldap.unbind(); // asynchronously
@@ -289,11 +289,11 @@ class Session {
             for (const level in LDAPEventLevels) {
                 LDAPEventLevels[level].forEach(function(event) {
                     ldap.client.on(event, function(err) {
-                        ldapLog[level](err, `LDAP ${event}`);
+                        log[level](err, `LDAP ${event}`);
                     });
                 });
             }
-            ldapLog.debug('LDAP> bind %s', Config.LDAP.bindDN);
+            log.debug('LDAP> bind %s', Config.LDAP.bindDN);
             ldap.bind(
                 Config.LDAP.bindDN, Config.LDAP.password
             ).then(function() {
@@ -303,10 +303,10 @@ class Session {
                     attributes: [userNameAttribute, passwordAttribute],
                     sizeLimit: 1,
                 };
-                ldapLog.debug('LDAP> search %o', options);
+                log.debug('LDAP> search %o', options);
                 return ldap.searchReturnAll(Config.LDAP.baseDN, options);
             }).then(function(results) {
-                ldapLog.debug('LDAP< %o', results);
+                log.debug('LDAP< %o', results);
                 if (results.entries && results.entries.length > 0) {
                     that.area = area;
                     var entry = results.entries[0];
@@ -315,11 +315,11 @@ class Session {
                     finish(`${area} isn't in the directory.`);
                 }
             }).catch(function ldapFailed(err) {
-                ldapLog.warn(err, 'LDAP');
+                log.warn(err, 'LDAP');
                 finish(`LDAP ${err}`);
             });
         } catch(err) {
-            this.log.warn(err, 'LDAP');
+            log.warn(err, 'LDAP');
             next(`LDAP ${err}`);
         }
     }
