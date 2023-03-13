@@ -633,15 +633,17 @@ class Session {
             if (message.headers) {
                 m.headers = message.headers;
             }
-            this.log.info('SMTP> %o, body.length: %d', m, body.length);
+            this.log.debug('SMTP> %o, body.length: %d', m, body.length);
             m.text = body.toString('utf-8');
             smtp.sendMail(m, function(err, info) {
                 if (err) {
-                    that.client.write(`${err}${EOL}${Prompt}`);
+                    that.log.warn(err, 'SMTP sendMail');
+                    that.client.write(`SMTP ${err}${EOL}`);
                 } else {
-                    that.log.info(`SMTP< %o`, info);
-                    that.client.write(`Msg queued${EOL}${Prompt}`);
+                    that.log.debug(`SMTP< %o`, info);
+                    that.client.write(`Msg queued${EOL}`);
                 }
+                that.client.write(Prompt);
             });
         } catch(err) {
             this.log.warn(err, 'SMTP');
