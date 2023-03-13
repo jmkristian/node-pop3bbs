@@ -308,11 +308,12 @@ class Session {
             }).then(function(results) {
                 log.debug('LDAP< %o', results);
                 if (results.entries && results.entries.length > 0) {
-                    that.area = area;
                     var entry = results.entries[0];
+                    that.area = area;
+                    that.closePOP(); // asynchronously
                     finish(null, entry[userNameAttribute], entry[passwordAttribute]);
                 } else {
-                    finish(`${area} isn't in the directory.`);
+                    finish(`There's no area named ${area}.`);
                 }
             }).catch(function ldapFailed(err) {
                 log.warn(err, 'LDAP');
@@ -326,59 +327,60 @@ class Session {
 
     openPOP(next) {
         var that = this;
-        that.closePOP(function afterClose() {
-            try {
-                var options = {
-                    host: Config.POP.host,
-                    port: Config.POP.port,
-                    tls: false,
-                    username: that.POP.userName,
-                    password: that.POP.password,
-                    mailparser: true,
-                };
-                that.log.debug(`POP> %o`, options);
-                that.POP.deleted = {};
-                that.POP.server = new POP.Client(options);
-                that.POP.server.connect(function(err) {
-                    if (err) {
-                        next(`POP connect: ${err}`);
-                    } else {
-                        that.POP.server.count(function(err, count) {
-                            that.popCount = count;
-                            if (err) {
-                                next(`POP count: ${err}`);
-                            } else {
-                                that.client.write(
-                                    ((count <= 0) ? 'You have 0 messages.'
-                                     : (count == 1) ? 'You have 1 message  -  1 new.'
-                                     : `You have ${count} messages  -  ${count} new.`)
-                                        + `${EOL}`);
-                                next();
-                            }
-                        });
-                    }
-                });
-            } catch(err) {
-                that.log.warn(err, 'POP connect');
-                next(`POP ${err}`);
-            }
-        });
+        that.closePOP(); // asynchronously
+        try {
+            var options = {
+                host: Config.POP.host,
+                port: Config.POP.port,
+                tls: false,
+                username: that.POP.userName,
+                password: that.POP.password,
+                mailparser: true,
+            };
+            that.log.debug(`POP> %o`, options);
+            that.POP.server = new POP.Client(options);
+            that.POP.server.connect(function(err) {
+                if (err) {
+                    delete that.POP.server;
+                    next(`POP connect ${err}`);
+                } else {
+                    that.POP.deleted = {};
+                    that.POP.server.count(function(err, count) {
+                        that.POP.count = count;
+                        if (err) {
+                            next(`POP count ${err}`);
+                        } else {
+                            that.client.write(
+                                ((count <= 0) ? 'You have 0 messages.'
+                                 : (count == 1) ? 'You have 1 message  -  1 new.'
+                                 : `You have ${count} messages  -  ${count} new.`)
+                                    + `${EOL}`);
+                            next();
+                        }
+                    });
+                }
+            });
+        } catch(err) {
+            that.log.warn(err, 'POP connect');
+            next(`POP ${err}`);
+        }
     }
 
     closePOP(next) {
-        var that = this;
-        if (that.POP.server) {
-            that.POP.server.quit(function(err) {
+        var server = this.POP.server;
+        delete this.POP.server;
+        delete this.POP.count;
+        delete this.POP.deleted;
+        if (server) {
+            var that = this;
+            server.quit(function(err) {
                 if (err) {
-                    that.client.write(`POP quit ${err}${EOL}`);
+                    that.log(`POP quit ${err}${EOL}`);
                 }
-                that.POP.server.disconnect(); // asynchronously
-                delete that.POP.server;
-                delete that.POP.deleted;
+                server.disconnect(); // asynchronously
                 if (next) next();
             });
         } else {
-            delete that.POP.deleted;
             if (next) next();
         }
     }
@@ -387,16 +389,18 @@ class Session {
         var that = this;
         var finish = function(err) {
             if (err) {
-                that.log.warn(err, 'POP');
+                that.log.warn(`POP ${err}`);
                 that.client.write(`POP ${err}${EOL}`);
             }
             that.client.write(`${EOL}${Prompt}`);
         }
         try {
-            var count = this.popCount || 0;
-            var that = this;
+            var count = this.POP.count || 0;
             this.client.write(`Mail area: ${this.area}${EOL}`
                               + `${count} messages  -  ${count} new${EOL}${EOL}`);
+            if (!this.POP.server) {
+                throw '';
+            }
             this.POP.server.list(function(err, sizes) {
                 if (err) {
                     finish(err);
@@ -472,9 +476,7 @@ class Session {
             break;
         case 'a':
         case 'area':
-            this.closePOP(function() {
-                that.setArea(parts[1]);
-            });
+            that.setArea(parts[1]);
             return;
         case 'l':  // list
         case 'la': // list all
