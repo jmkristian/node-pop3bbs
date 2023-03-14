@@ -250,7 +250,7 @@ class AGWReader extends Stream.Transform {
             this.buffer = (newBufferLength <= 0) ? null
                 : copyBuffer(this.buffer, dataLength + this.headerLength);
             if (this.log.debug()) {
-                this.log.debug('< %s', getFrameSummary(result));
+                this.log.debug('AGWPE< %s', getFrameSummary(result));
             }
             this.push(result);
         }
@@ -278,7 +278,7 @@ class AGWWriter extends Stream.Transform {
         } else {
             var frame = toFrame(chunk, encoding);
             if (this.log.debug()) {
-                this.log.debug('> %s', getFrameSummary(chunk));
+                this.log.debug('AGWPE> %s', getFrameSummary(chunk));
             }
             afterTransform(null, frame);
         }

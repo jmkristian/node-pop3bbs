@@ -2,13 +2,22 @@ const fs = require('fs');
 const ini = require('ini');
 const URL = require('url').URL;
 
-function groom(config) {
-    if (config.AGWPE) {
-        config.AGWPE.port = parseInt(config.AGWPE.port || '8000');
-        config.AGWPE.frameLength = parseInt(config.AGWPE.frameLength || '256');
-        if (config.AGWPE.myCallSigns) {
-            config.AGWPE.myCallSigns = config.AGWPE.myCallSigns.trim().split(/\s+/);
+function groomTNC(config, defaultPort) {
+    if (config) {
+        config.port = parseInt(config.port || `${defaultPort}`);
+        config.frameLength = parseInt(config.frameLength || '256');
+        if (config.myCallSigns) {
+            config.myCallSigns = config.myCallSigns.trim().split(/\s+/);
         }
+    }
+}
+
+function groom(config) {
+    groomTNC(config.AGWPE, 8000);
+    groomTNC(config['VARA FM'], 8300);
+    if (config['VARA FM']) {
+        config['VARA FM'].dataPort = parseInt(
+            config['VARA FM'].dataPort || (config['VARA FM'].port + 1) + '');
     }
     if (config.LDAP) {
         if (!config.LDAP.userIdAttribute) {

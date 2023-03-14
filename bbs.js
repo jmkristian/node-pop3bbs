@@ -1,7 +1,8 @@
 /** Serve as a BBS that looks like JNOS. */
 
-const AGW = require('./agwapi');
 const Config = require('./config').readFile(process.argv[2] || 'config.ini');
+const AGW = require('./agwapi');
+const VARAFM = require('./varafm');
 const EventEmitter = require('events');
 const LDAP = require('ldapjs-promise');
 const POP = require('yapople');
@@ -652,14 +653,27 @@ class Session {
     }
 }
 
-var agw = new AGW.Server(Config);
-agw.on('error', function(err) {
-    log.warn(err, 'AGW error');
-});
-agw.on('connection', function(c) {
-    log.debug('AGW connection');
-    var session = new Session(c, c.theirCall);
-});
-agw.listen({callTo: Config.AGWPE.myCallSigns}, function(info) {
-    this.log.info('AGW listening %o', info);
-});
+if (Config.AGWPE) {
+    var server = new AGW.Server(Config);
+    server.on('error', function(err) {
+        log.warn(err, 'AGWPE error');
+    });
+    server.on('connection', function(c) {
+        log.debug('AGWPE connection');
+        var session = new Session(c, c.theirCall);
+    });
+    server.listen({callTo: Config.AGWPE.myCallSigns}, function(info) {
+        this.log.info('AGWPE listening %o', info);
+    });
+}
+
+if (Config['VARA FM']) {
+    var server = new VARAFM.Server(Config);
+    server.on('error', function(err) {
+        log.warn(err, 'VARA error');
+    });
+    server.on('connection', function(c) {
+        log.debug('VARA connection');
+        var session = new Session(c, c.theirCall);
+    });
+}
