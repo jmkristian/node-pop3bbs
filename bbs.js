@@ -670,10 +670,10 @@ if (Config.AGWPE) {
 if (Config['VARA FM']) {
     var server = new VARA.Server(Config, VARA.FM);
     server.on('error', function(err) {
-        log.warn(err, 'VARA error');
+        log.warn(err, 'VARA FM error');
     });
     server.on('connection', function(c) {
-        log.debug('VARA connection');
+        log.debug('VARA FM connection from %s', c.theirCall);
         var session = new Session(c, c.theirCall);
     });
 }
@@ -681,10 +681,10 @@ if (Config['VARA FM']) {
 if (Config['VARA HF']) {
     var server = new VARA.Server(Config, VARA.HF);
     server.on('error', function(err) {
-        log.warn(err, 'VARA error');
+        log.warn(err, 'VARA HF error');
     });
     server.on('connection', function(c) {
-        log.debug('VARA connection');
+        log.debug('VARA HF connection from %s', c.theirCall);
         var session = new Session(c, c.theirCall);
     });
 }

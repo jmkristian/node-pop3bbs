@@ -336,6 +336,7 @@ class Server extends EventEmitter {
 
     connectDataSocket() {
         if (!this.dataSocket) {
+            this.log.debug('connectDataSocket');
             this.dataSocket = new Net.Socket();
             var that = this;
             ['error', 'timeout'].forEach(function(event) {
