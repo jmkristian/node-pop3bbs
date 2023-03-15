@@ -2,7 +2,7 @@
 
 const Config = require('./config').readFile(process.argv[2] || 'config.ini');
 const AGW = require('./agwapi');
-const VARAFM = require('./varafm');
+const VARA = require('./varaapi');
 const EventEmitter = require('events');
 const LDAP = require('ldapjs-promise');
 const POP = require('yapople');
@@ -668,7 +668,18 @@ if (Config.AGWPE) {
 }
 
 if (Config['VARA FM']) {
-    var server = new VARAFM.Server(Config);
+    var server = new VARA.Server(Config, VARA.FM);
+    server.on('error', function(err) {
+        log.warn(err, 'VARA error');
+    });
+    server.on('connection', function(c) {
+        log.debug('VARA connection');
+        var session = new Session(c, c.theirCall);
+    });
+}
+
+if (Config['VARA HF']) {
+    var server = new VARA.Server(Config, VARA.HF);
     server.on('error', function(err) {
         log.warn(err, 'VARA error');
     });

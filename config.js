@@ -14,10 +14,15 @@ function groomTNC(config, defaultPort) {
 
 function groom(config) {
     groomTNC(config.AGWPE, 8000);
+    groomTNC(config['VARA HF'], 8300);
     groomTNC(config['VARA FM'], 8300);
     if (config['VARA FM']) {
         config['VARA FM'].dataPort = parseInt(
             config['VARA FM'].dataPort || (config['VARA FM'].port + 1) + '');
+    }
+    if (config['VARA HF']) {
+        config['VARA HF'].dataPort = parseInt(
+            config['VARA HF'].dataPort || (config['VARA HF'].port + 1) + '');
     }
     if (config.LDAP) {
         if (!config.LDAP.userIdAttribute) {

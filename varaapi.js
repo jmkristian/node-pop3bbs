@@ -6,7 +6,6 @@ const Net = require('net');
 const Stream = require('stream');
 
 const KByte = 1 << 10;
-const optionSection = 'VARA FM';
 
 const LogNothing = Bunyan.createLogger({
     name: 'stub',
@@ -43,9 +42,10 @@ function getDataSummary(data) {
 /** Pipes data from a Readable stream to a fromVARA method. */
 class VARAReceiver extends Stream.Writable {
 
-    constructor(options, target) {
+    constructor(options, flavor, target) {
         super(); // The defaults are good.
         this.log = getLogger(options, this);
+        this.flavor = flavor;
         this.target = target;
     }
 
@@ -57,7 +57,8 @@ class VARAReceiver extends Stream.Writable {
                 throw 'Lost received data ' + getDataSummary(chunk);
             } else {
                 if (this.log.trace()) {
-                    this.log.trace('VARA< %s', getDataSummary(chunk));
+                    this.log.trace('VARA %s< %s',
+                                   this.flavor, getDataSummary(chunk));
                 }
                 this.target.fromVARA(chunk);
             }
@@ -71,14 +72,16 @@ class VARAReceiver extends Stream.Writable {
 
 /** Exchanges bytes between one local call sign and one remote call sign. */
 class Connection extends Stream.Duplex {
-    /* It's tempting to simply provide the dataSocket to the application,
-       but this doesn't work. In particular, when the application calls
-       connection.end(data), we must wait for VARA to report that it has
-       transmitted all the data before closing the dataSocket.
-       Also, the dataSocket doesn't always emit close when you expect.
+    /* It's tempting to simply provide the dataSocket to the application, but
+       this doesn't work. The dataSocket doesn't always emit close when you
+       expect. And when the application calls connection.end(data), we must
+       wait for VARA to report that it has transmitted all the data before
+       closing the dataSocket. And it's not clear from the documentation
+       whether VARA closes the dataSocket when the VARA connection is
+       disconnected.
     */
 
-    constructor(options, dataSocket) {
+    constructor(options, flavor, dataSocket) {
         super({
             allowHalfOpen: true,
             emitClose: false, // emitClose: true doesn't always emit close.
@@ -88,15 +91,30 @@ class Connection extends Stream.Duplex {
             writableHighWaterMark: 4 * KByte,
         });
         this.log = getLogger(options, this);
+        this.flavor = flavor;
         this.dataSocket = dataSocket;
         this.bufferLength = 0;
+        var that = this;
+        this.on('end', function onEnd(err) {
+            that.ended = true;
+        });
+        this.on('close', function onClose(err) {
+            if (!that.ended) {
+                that.ended = true;
+                that.emit('end');
+            }
+            that.closed = true;
+        });
     }
 
     _write(data, encoding, callback) {
-        if (this.iAmClosed) {
+        if (this.ended) {
             callback();
         } else {
-            this.log.debug('VARA data> %s', getDataSummary(data));
+            if (this.log.debug()) {
+                this.log.debug('VARA %s data> %s',
+                               this.flavor, getDataSummary(data));
+            }
             this.bufferLength += data.length;
             this.dataSocket.write(data, encoding, callback);
         }
@@ -117,9 +135,12 @@ class Connection extends Stream.Duplex {
         // The documentation seems to say this.destroy() should emit
         // 'end' and 'close', but I find that doesn't always happen.
         // This works reliably:
-        if (!this.iAmClosed) {
-            this.iAmClosed = true;
+        if (!this.ended) {
+            this.ended = true;
             this.emit('end');
+        }
+        if (!this.closed) {
+            this.closed = true;
             this.emit('close');
         }
         delete this.dataSocket;
@@ -127,15 +148,16 @@ class Connection extends Stream.Duplex {
     }
 
     fromVARA(buffer) {
-        this.log.debug('VARA data< ' + getDataSummary(buffer));
-        if (!this.iAmClosed) {
-            if (this.receiveBufferIsFull) {
-                this.emit('error',
-                          new Error('receive buffer overflow: '
-                                    + getDataSummary(buffer)));
-            } else {
-                this.receiveBufferIsFull = !this.push(buffer);
-            }
+        if (this.log.debug()) {
+            this.log.debug('VARA %s data< %s',
+                           this.flavor, getDataSummary(buffer));
+        }
+        if (this.receiveBufferIsFull) {
+            this.emit('error',
+                      new Error('VARA receive buffer overflow: '
+                                + getDataSummary(buffer)));
+        } else {
+            this.receiveBufferIsFull = !this.push(buffer);
         }
     }
 
@@ -149,14 +171,21 @@ class Connection extends Stream.Duplex {
 */
 class Server extends EventEmitter {
 
-    constructor(options, onConnection) {
+    /** flavor must be either FM or HF. */
+    constructor(options, flavor, onConnection) {
         super();
         this.options = options;
-        this.myOptions = options && options[optionSection];
+        this.flavor = flavor;
+        this.myOptions = options && options[`VARA ${flavor}`];
         this.log = getLogger(options, this);
-        this.outputBuffer = [];
-        if (onConnection) this.on('connection', onConnection);
-        this.listen(options);
+        if (!this.myOptions) {
+            this.emit('error', new Error(`missing options['VARA ${flavor}']`));
+            this.close();
+        } else {
+            this.outputBuffer = [];
+            if (onConnection) this.on('connection', onConnection);
+            this.listen(options);
+        }
     }
     
     /** May be called repeatedly with different call signs. */
@@ -174,6 +203,7 @@ class Server extends EventEmitter {
     }
 
     close(afterClose) {
+        this.log.debug('close()');
         this.iAmClosed = true;
         this.socket.destroy();
         if (afterClose) afterClose();
@@ -191,9 +221,9 @@ class Server extends EventEmitter {
         if (this.outputBuffer.length) {
             var line = this.outputBuffer.shift();
             var waitFor = this.outputBuffer.shift();
-            this.log.debug(`VARA> ${line}`);
+            this.log.debug(`VARA ${this.flavor}> ${line}`);
             this.socket.write(line + '\r');
-            this.waitingFor = waitFor;
+            this.waitingFor = waitFor && waitFor.toLowerCase();
         }
     }
 
@@ -206,10 +236,19 @@ class Server extends EventEmitter {
         while (0 <= (CR = this.inputBuffer.indexOf('\r'))) {
             var line = this.inputBuffer.substring(0, CR);
             this.inputBuffer = this.inputBuffer.substring(CR + 1);
-            this.log.debug(`VARA< ${line}`);
             var parts = line.split(/\s+/);
             var part0 = parts[0].toLowerCase();
-            if (this.waitingFor != null && this.waitingFor.toLowerCase() == part0) {
+            switch(part0) {
+            case 'busy':
+            case 'iamalive':
+            case 'ptt':
+                // boring
+                this.log.trace(`VARA ${this.flavor}< ${line}`);
+                break;
+            default:
+                this.log.debug(`VARA ${this.flavor}< ${line}`);
+            }
+            if (this.waitingFor && this.waitingFor == part0) {
                 this.waitingFor = null;
                 this.flushToVARA();
             }
@@ -217,38 +256,45 @@ class Server extends EventEmitter {
             case '':
                 break;
             case 'pending':
-                this.connectData();
+                this.connectDataSocket();
+                break;
+            case 'cancelpending':
+                if (!this.isConnected) {
+                    this.disconnectData();
+                }
                 break;
             case 'connected':
                 this.connectData(parts);
                 break;
             case 'disconnected':
-                this.disconnectData();
+                this.isConnected = false;
+                this.disconnectData(parts[1]);
                 break;
             case 'buffer':
-                if ((this.connection.bufferLength = parseInt(parts[1])) <= 0
-                    && this.endingData) {
-                    this.dataSocket.end(); // which will emit a finish event
-                    /* This isn't foolproof. If we send data simultaneous with
-                       receiving 'BUFFER 0' from VARA, in which case we'd call
-                       data.socket.end() prematurely and consequently VARA
+                if (this.endingData &&
+                    (this.connection.bufferLength = parseInt(parts[1])) <= 0) {
+                    this.endingData = false;
+                    this.disconnectData();
+                    /* This isn't foolproof. If we send data simultaneous
+                       with receiving 'BUFFER 0' from VARA, we might call
+                       disconnectData prematurely and consequently VARA
                        would lose the data.
                     */
                 }
                 break;
             case 'missing':
-                this.log.error(`VARA< ${line}`);
+                this.log.error(`VARA ${this.flavor}< ${line}`);
                 this.close();
                 break;
             case 'wrong':
-                this.log.warn(`VARA< ${line}`);
+                this.log.warn(`VARA ${this.flavor}< ${line}`);
                 this.waitingFor = null;
                 this.flushToVARA();
                 break;
             default:
+                // We already logged it. No other action needed.
             }
         }
-        this.log.trace('fromVARA returns');
     }
 
     connectVARA() {
@@ -259,14 +305,16 @@ class Server extends EventEmitter {
         this.socket = new Net.Socket();
         var that = this;
         this.socket.on('error', function(err) {
-            if (err && `${err}`.includes('ECONNREFUSED')) {
+            if (err &&
+                (`${err}`.includes('ECONNREFUSED') ||
+                 `${err}`.includes('ETIMEDOUT'))) {
                 that.log.error('socket %s', err || '');
                 that.close();
             } else {
                 that.log.debug('socket error %s', err || '');
             }
         });
-        // VARA closes the TNC connection at the end of each data connection.
+        // VARA might close the socket. The documentation doesn't say.
         this.socket.on('close', function(info) {
             that.log.debug('socket close %s', info || '');
             if (!that.iAmClosed) {
@@ -278,100 +326,105 @@ class Server extends EventEmitter {
                 that.log.debug('socket %s %s', event, info || '');
             });
         });
-        this.socket.pipe(new VARAReceiver(this.options, this));
+        this.socket.pipe(new VARAReceiver(this.options, this.flavor, this));
         this.socket.connect(this.myOptions);
         this.toVARA('VERSION', 'VERSION');
         this.toVARA(`MYCALL ${this.myCall}`, 'OK');
-        // this.toVARA(`CHAT OFF`, 'OK');
+        // this.toVARA(`CHAT OFF`, 'OK'); // seems to be unnecessary
         this.toVARA('LISTEN ON', 'OK');
     }
 
-    connectData(parts) {
+    connectDataSocket() {
         if (!this.dataSocket) {
             this.dataSocket = new Net.Socket();
-            this.dataReceiver = new VARAReceiver(this.options);
-            this.dataSocket.pipe(this.dataReceiver);
             var that = this;
             ['error', 'timeout'].forEach(function(event) {
-                that.dataSocket.on(event, function(info) {
+                that.dataSocket.on(event, function onDataSocketEvent(info) {
+                    that.log.debug('dataSocket %s %s', event, info || '');
                     if (that.connection) {
-                        that.log.debug('dataSocket %s', event);
                         that.connection.emit(event, info);
-                    } else {
-                        that.log.warn('dataSocket %s %s', event, info);
                     }
                 });
             });
-            ['end', 'finish', 'close'].forEach(function(event) {
+            ['end', 'close'].forEach(function(event) {
                 that.dataSocket.on(event, function(err) {
-                    if (err) that.log.warn('dataSocket finish %s', err);
-                    else that.log.debug('dataSocket finish');
-                    if (that.isConnected) {
-                        that.toVARA('DISCONNECT');
-                    }
-                    that.disconnectData();
+                    if (err) that.log.warn('dataSocket %s %s', event, err);
+                    else that.log.debug('dataSocket %s', event);
+                    that.disconnectData(err);
+                    delete that.dataSocket;
                 });
             });
             this.dataSocket.connect({
                 host: this.myOptions.host,
                 port: this.myOptions.dataPort,
             });
-            this.connection = new Connection(this.options, this.dataSocket);
-            this.dataReceiver.target = this.connection;
-            this.connection.on('finish', function(err) {
-                if (err) that.log.warn('connection finish %s', err);
-                else that.log.debug('connection finish');
-                if (that.connection.bufferLength <= 0) {
-                    that.dataSocket.end(); // which will emit a finish event
-                } else {
-                    /* If we end the dataSocket now, VARA will lose the data in
-                       its buffer. So, wait until VARA reports that its buffer
-                       is empty and then end the dataSocket.
-                    */
-                    that.endingData = true;
-                }
-            });
-            ['end', 'close'].forEach(function(event) {
-                that.connection.on(event, function(err) {
-                    that.log.debug('connection %s %s', event, err || '');
-                });
-            });
-        }
-        if (parts) {
-            this.connection.theirCall = parts[1];
-            this.connection.myCall = parts[2];
-            this.isConnected = true;
-            this.emit('connection', this.connection);
         }
     }
 
-    disconnectData() {
+    connectData(parts) {
+        if (this.dataSocket && this.dataReceiver) {
+            // It appears we're re-using an old dataSocket.
+            this.dataSocket.unpipe(this.dataReceiver);
+            delete this.dataReceiver;
+        }
+        this.connectDataSocket(); // if necessary
+        this.connection =
+            new Connection(this.options, this.flavor, this.dataSocket);
+        var that = this;
+        ['end', 'close'].forEach(function(event) {
+            that.connection.on(event, function(err) {
+                that.log.debug('connection %s %s', event, err || '');
+            });
+        });
+        this.connection.on('finish', function(err) {
+            if (err) that.log.warn('connection finish %s', err);
+            else that.log.debug('connection finish');
+            if (that.isConnected) {
+                if (that.connection.bufferLength <= 0) {
+                    that.disconnectData(err);
+                } else {
+                    /* If we send DISCONNECT now, VARA will lose the data in its
+                       buffer. So, wait until VARA reports that its buffer is empty
+                       and then end the dataSocket.
+                    */
+                    that.endingData = true;
+                }
+            }
+        });
+        this.connection.theirCall = parts[1];
+        this.connection.myCall = parts[2];
+        this.dataReceiver
+            = new VARAReceiver(this.options, this.flavor, this.connection);
+        this.dataSocket.pipe(this.dataReceiver);
+        this.isConnected = true;
+        this.emit('connection', this.connection);
+    }
+
+    disconnectData(err) {
+        if (this.isConnected) {
+            this.toVARA('DISCONNECT');
+        }
         this.isConnected = false;
         this.endingData = false;
         if (this.dataReceiver) {
-            this.dataReceiver.target = null;
+            if (this.dataSocket) {
+                this.dataSocket.unpipe(this.dataReceiver);
+            }
             delete this.dataReceiver;
         }
         if (this.connection) {
             try {
-                this.connection.destroy();
+                this.connection.destroy(err);
             } catch(err) {
                 this.log.error(err);
             }
             delete this.connection;
         }
-        if (this.dataSocket) {
-            try {
-                this.dataSocket.end();
-                this.dataSocket.destroy();
-            } catch(err) {
-                this.log.error(err);
-            }
-            delete this.dataSocket;
-        }
     }
 
 } // Server
 
+exports.HF = 'HF';
+exports.FM = 'FM';
 exports.Server = Server;
 exports.toDataSummary = getDataSummary;
