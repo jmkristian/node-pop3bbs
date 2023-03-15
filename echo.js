@@ -1,32 +1,43 @@
 /** Echo AX.25 traffic. */
 
-const AGW = require('./agwapi');
 const Config = require('./config').readFile(process.argv[2] || 'config.ini');
 
-var server = new AGW.Server(
-    Config,
-    function(c) {
-        c.write('Hello.\r');
-        c.on('data', function(chunk) {
-            if (chunk.toString('ascii') == 'B\r') {
-                c.end('Goodbye.\r');
-            } else {
-                c.write(chunk); // echo
-            }
-        });
-        c.on('error', function(err) {
-            throw err;
-        });
-        c.on('finish', function(err) {
-            console.log(`finish`);
-        });
-        c.on('close', function(err) {
-            console.log(`close`);
-        });
+function serve(moduleName, flavor) {
+    const module = require(moduleName);
+    var server = new module.Server(
+        Config,
+        function(c) {
+            c.write('Hello. Send "B" to disconnect.\r');
+            c.on('data', function(chunk) {
+                if (chunk.toString('ascii').toLowerCase() == 'b\r') {
+                    c.end('Goodbye.\r');
+                } else {
+                    c.write(chunk); // echo
+                }
+            });
+            c.on('error', function(err) {
+                throw err;
+            });
+            c.on('finish', function(err) {
+                console.log(`finish`);
+            });
+            c.on('close', function(err) {
+                console.log(`close`);
+            });
+        },
+        flavor,
+    );
+    server.on('error', function(err) {
+        console.log(moduleName + ' ' + flavor + ' error ' + (err || ''));
     });
-server.on('error', function(err) {
-    throw err;
-});
-server.listen({callTo: Config.AGWPE.myCallSigns}, function(info) {
-    console.log('listening ' + JSON.stringify(info));
-});
+}
+
+if (Config.AGWPE) {
+    serve('./agwapi');
+}
+if (Config['VARA FM']) {
+    serve('./varaapi', 'FM');
+}
+if (Config['VARA HF']) {
+    serve('./varaapi', 'HF');
+}

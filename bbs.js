@@ -668,7 +668,7 @@ if (Config.AGWPE) {
 }
 
 if (Config['VARA FM']) {
-    var server = new VARA.Server(Config, VARA.FM);
+    var server = new VARA.Server(Config, null, VARA.FM);
     server.on('error', function(err) {
         log.warn(err, 'VARA FM error');
     });
@@ -679,7 +679,7 @@ if (Config['VARA FM']) {
 }
 
 if (Config['VARA HF']) {
-    var server = new VARA.Server(Config, VARA.HF);
+    var server = new VARA.Server(Config, null, VARA.HF);
     server.on('error', function(err) {
         log.warn(err, 'VARA HF error');
     });

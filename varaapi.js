@@ -172,7 +172,7 @@ class Connection extends Stream.Duplex {
 class Server extends EventEmitter {
 
     /** flavor must be either FM or HF. */
-    constructor(options, flavor, onConnection) {
+    constructor(options, onConnection, flavor) {
         super();
         this.options = options;
         this.flavor = flavor;
