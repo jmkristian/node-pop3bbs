@@ -193,7 +193,7 @@ class AGWReader extends Stream.Transform {
             readableObjectMode: true,
             readableHighWaterMark: 1, // frame
             writableObjectMode: false,
-            writableHighWaterMark: HeaderLength + options.AGWPE.frameLength, // bytes
+            writableHighWaterMark: HeaderLength + options.frameLength, // bytes
         });
         this.header = Buffer.alloc(HeaderLength);
         this.headerLength = 0;
@@ -264,10 +264,10 @@ class AGWWriter extends Stream.Transform {
     constructor(options) {
         super({
             readableObjectMode: false,
-            readableHighWaterMark: HeaderLength + options.AGWPE.frameLength, // bytes
+            readableHighWaterMark: HeaderLength + options.frameLength, // bytes
             writableObjectMode: true,
             writableHighWaterMark: 1, // frame
-            defaultEncoding: options && options.AGWPE.encoding,
+            defaultEncoding: options && options.encoding,
         });
         this.log = getLogger(options, this);
     }
@@ -312,7 +312,7 @@ class Router extends EventEmitter {
     constructor(toAGW, fromAGW, options, server) {
         super();
         this.log = getLogger(options, this);
-        this.log.trace('new %o', options.AGWPE);
+        this.log.trace('new %o', options);
         this.toAGW = toAGW;
         this.fromAGW = fromAGW;
         this.options = options;
@@ -491,7 +491,7 @@ class Throttle extends Stream.Transform {
             writableHighWaterMark: 1,
         });
         this.log = getLogger(options, this);
-        this.log.trace('new %o', options.AGWPE);
+        this.log.trace('new %o', options);
         this.toAGW = toAGW;
         this.inFlight = 0;
         this.maxInFlight = MaxFramesInFlight;
@@ -702,14 +702,14 @@ class DataToFrames extends Stream.Transform {
             readableObjectMode: true,
             readableHighWaterMark: 1,
             writableObjectMode: false,
-            writableHighWaterMark: options.AGWPE.frameLength,
+            writableHighWaterMark: options.frameLength,
         });
         this.log = getLogger(options, this);
-        this.log.trace('new %o', options.AGWPE);
+        this.log.trace('new %o', options);
         this.port = frame.port;
         this.myCall = frame.callTo;
         this.theirCall = frame.callFrom;
-        this.maxDataLength = options.AGWPE.frameLength;
+        this.maxDataLength = options.frameLength;
         this.bufferCount = 0;
     }
 
@@ -823,10 +823,10 @@ class Connection extends Stream.Duplex {
             readableObjectMode: false,
             readableHighWaterMark: 4 * KByte,
             writableObjectMode: false,
-            writableHighWaterMark: options.AGWPE.frameLength,
+            writableHighWaterMark: options.frameLength,
         });
         this.log = getLogger(options, this);
-        this.log.trace('new %o', options.AGWPE);
+        this.log.trace('new %o', options);
         this.toAGW = toAGW;
         this.port = toAGW.port;
         this.myCall = toAGW.myCall;
@@ -893,7 +893,7 @@ class Server extends EventEmitter {
         var router = new PortRouter(this.toAGW, relay, options, this);
         if (onConnect) this.on('connection', onConnect);
         var that = this;
-        var givenConnection = options && options.AGWPE && options.AGWPE.connection;
+        var givenConnection = options && options && options.connection;
         var socket = givenConnection || new Net.Socket();
         ['error', 'timeout'].forEach(function(event) {
             [socket, relay].forEach(function(from) {
@@ -907,7 +907,7 @@ class Server extends EventEmitter {
         socket.pipe(this.fromAGW);
         this.toAGW.pipe(socket);
         if (!givenConnection) {
-            socket.connect(options.AGWPE);
+            socket.connect(options);
         }
         this.socket = socket;
         this.toAGW.write({dataKind: 'G'}); // Get information about all ports

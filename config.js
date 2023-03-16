@@ -2,20 +2,33 @@ const fs = require('fs');
 const ini = require('ini');
 const URL = require('url').URL;
 
-function groomTNC(config, defaultPort) {
-    if (config) {
-        config.port = parseInt(config.port || `${defaultPort}`);
-        config.frameLength = parseInt(config.frameLength || '256');
-        if (config.myCallSigns) {
-            config.myCallSigns = config.myCallSigns.trim().split(/\s+/);
+function groomTNC(logger, options, defaultPort) {
+    if (options) {
+        if (!options.logger) {
+            options.logger = logger;
+        }
+        options.port = parseInt(options.port || `${defaultPort}`);
+        options.frameLength = parseInt(options.frameLength || '256');
+        if (options.myCallSigns) {
+            options.myCallSigns = options.myCallSigns.trim().split(/\s+/);
         }
     }
 }
 
 function groom(config) {
-    groomTNC(config.AGWPE, 8000);
-    groomTNC(config['VARA HF'], 8300);
-    groomTNC(config['VARA FM'], 8300);
+    if (!config.logger && config.log) {
+        const Bunyan = require('bunyan');
+        if (config.log.name == null) {
+            config.log.name = ':';
+        }
+        if (config.log.level) {
+            config.log.level = Bunyan[config.log.level];
+        }
+        config.logger = Bunyan.createLogger(config.log);
+    }
+    groomTNC(config.logger, config.AGWPE, 8000);
+    groomTNC(config.logger, config['VARA HF'], 8300);
+    groomTNC(config.logger, config['VARA FM'], 8300);
     if (config['VARA FM']) {
         config['VARA FM'].dataPort = parseInt(
             config['VARA FM'].dataPort || (config['VARA FM'].port + 1) + '');
@@ -71,16 +84,6 @@ function groom(config) {
             }
             config.LDAP.URL = url;
         }
-    }
-    if (config.log) {
-        var Bunyan = require('bunyan');
-        if (config.log.name == null) {
-            config.log.name = ':';
-        }
-        if (config.log.level) {
-            config.log.level = Bunyan[config.log.level];
-        }
-        config.logger = Bunyan.createLogger(config.log);
     }
     if (config.POP) {
         config.POP.port = parseInt(config.POP.port || '110');

@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "A BBS backed by standard email servers",
   "main": "bbs.js",
+  "engines": {
+    "node": ">=8.17.0"
+  },
   "dependencies": {
     "bunyan": "^1.8.15",
     "ini": "^2.0.0",

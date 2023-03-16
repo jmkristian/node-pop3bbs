@@ -59,6 +59,16 @@ const Prompt = `(#1) >${EOL}`;
 
 var serialNumber = 0;
 
+function getLogger(config, that) {
+    if (!config.logger) {
+        return LogNothing;
+    } else if (that) {
+        return config.logger.child({'class': that.constructor.name});
+    } else {
+        return config.logger;
+    }
+}
+
 function column(width, data) {
     switch(typeof data) {
     // case 'undefined':
@@ -653,38 +663,24 @@ class Session {
     }
 }
 
-if (Config.AGWPE) {
-    var server = new AGW.Server(Config);
-    server.on('error', function(err) {
-        log.warn(err, 'AGWPE error');
-    });
-    server.on('connection', function(c) {
-        log.debug('AGWPE connection');
-        var session = new Session(c, c.theirCall);
-    });
-    server.listen({callTo: Config.AGWPE.myCallSigns}, function(info) {
-        this.log.info('AGWPE listening %o', info);
-    });
+function serve(section, serverClass, flavor) {
+    const options = Config[section];
+    if (options) {
+        const server = new serverClass(options, undefined, flavor);
+        const log = options.logger;
+        server.on('error', function(err) {
+            log.warn(err, `${section} error`);
+        });
+        server.on('connection', function(c) {
+            log.debug(`${section} connection`);
+            var session = new Session(c, c.theirCall);
+        });
+        server.listen({callTo: options.myCallSigns}, function(info) {
+            log.info(`${section} listening %o`, info);
+        });
+    }
 }
 
-if (Config['VARA FM']) {
-    var server = new VARA.Server(Config, null, VARA.FM);
-    server.on('error', function(err) {
-        log.warn(err, 'VARA FM error');
-    });
-    server.on('connection', function(c) {
-        log.debug('VARA FM connection from %s', c.theirCall);
-        var session = new Session(c, c.theirCall);
-    });
-}
-
-if (Config['VARA HF']) {
-    var server = new VARA.Server(Config, null, VARA.HF);
-    server.on('error', function(err) {
-        log.warn(err, 'VARA HF error');
-    });
-    server.on('connection', function(c) {
-        log.debug('VARA HF connection from %s', c.theirCall);
-        var session = new Session(c, c.theirCall);
-    });
-}
+serve('AGWPE', AGW.Server);
+serve('VARA FM', VARA.Server, 'FM');
+serve('VARA HF', VARA.Server, 'HF');

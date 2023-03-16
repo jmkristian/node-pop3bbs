@@ -57,7 +57,7 @@ class VARAReceiver extends Stream.Writable {
                 throw 'Lost received data ' + getDataSummary(chunk);
             } else {
                 if (this.log.trace()) {
-                    this.log.trace('VARA %s< %s',
+                    this.log.trace('VARA%s< %s',
                                    this.flavor, getDataSummary(chunk));
                 }
                 this.target.fromVARA(chunk);
@@ -112,7 +112,7 @@ class Connection extends Stream.Duplex {
             callback();
         } else {
             if (this.log.debug()) {
-                this.log.debug('VARA %s data> %s',
+                this.log.debug('VARA%s data> %s',
                                this.flavor, getDataSummary(data));
             }
             this.bufferLength += data.length;
@@ -149,7 +149,7 @@ class Connection extends Stream.Duplex {
 
     fromVARA(buffer) {
         if (this.log.debug()) {
-            this.log.debug('VARA %s data< %s',
+            this.log.debug('VARA%s data< %s',
                            this.flavor, getDataSummary(buffer));
         }
         if (this.receiveBufferIsFull) {
@@ -171,20 +171,18 @@ class Connection extends Stream.Duplex {
 */
 class Server extends EventEmitter {
 
-    /** flavor must be either FM or HF. */
+    /** Typical flavors are 'FM' and 'HF'. */
     constructor(options, onConnection, flavor) {
         super();
         this.options = options;
-        this.flavor = flavor;
-        this.myOptions = options && options[`VARA ${flavor}`];
+        this.flavor = flavor ? ` ${flavor}` : '';
         this.log = getLogger(options, this);
-        if (!this.myOptions) {
-            this.emit('error', new Error(`missing options['VARA ${flavor}']`));
+        if (!this.options) {
+            this.emit('error', new Error(`VARA${flavor} missing options`));
             this.close();
         } else {
             this.outputBuffer = [];
             if (onConnection) this.on('connection', onConnection);
-            this.listen(options);
         }
     }
     
@@ -194,8 +192,8 @@ class Server extends EventEmitter {
         if (callback) {
             this.on('listening', callback);
         }
-        if (this.myOptions) {
-            this.myCall = this.myOptions.myCallSigns.join(' ');
+        if (this.options) {
+            this.myCall = this.options.myCallSigns.join(' ');
         }
         if (this.myCall) {
             this.connectVARA();
@@ -203,7 +201,7 @@ class Server extends EventEmitter {
     }
 
     close(afterClose) {
-        this.log.debug('close()');
+        this.log.debug(`VARA${this.flavor} close()`);
         this.iAmClosed = true;
         this.socket.destroy();
         if (afterClose) afterClose();
@@ -221,7 +219,7 @@ class Server extends EventEmitter {
         if (this.outputBuffer.length) {
             var line = this.outputBuffer.shift();
             var waitFor = this.outputBuffer.shift();
-            this.log.debug(`VARA ${this.flavor}> ${line}`);
+            this.log.debug(`VARA${this.flavor}> ${line}`);
             this.socket.write(line + '\r');
             this.waitingFor = waitFor && waitFor.toLowerCase();
         }
@@ -243,10 +241,10 @@ class Server extends EventEmitter {
             case 'iamalive':
             case 'ptt':
                 // boring
-                this.log.trace(`VARA ${this.flavor}< ${line}`);
+                this.log.trace(`VARA${this.flavor}< ${line}`);
                 break;
             default:
-                this.log.debug(`VARA ${this.flavor}< ${line}`);
+                this.log.debug(`VARA${this.flavor}< ${line}`);
             }
             if (this.waitingFor && this.waitingFor == part0) {
                 this.waitingFor = null;
@@ -283,11 +281,11 @@ class Server extends EventEmitter {
                 }
                 break;
             case 'missing':
-                this.log.error(`VARA ${this.flavor}< ${line}`);
+                this.log.error(`VARA${this.flavor}< ${line}`);
                 this.close();
                 break;
             case 'wrong':
-                this.log.warn(`VARA ${this.flavor}< ${line}`);
+                this.log.warn(`VARA${this.flavor}< ${line}`);
                 this.waitingFor = null;
                 this.flushToVARA();
                 break;
@@ -298,7 +296,7 @@ class Server extends EventEmitter {
     }
 
     connectVARA() {
-        this.log.debug('connectVARA');
+        this.log.debug(`VARA${this.flavor} connectVARA`);
         if (this.socket) {
             this.socket.destroy();
         }
@@ -308,15 +306,15 @@ class Server extends EventEmitter {
             if (err &&
                 (`${err}`.includes('ECONNREFUSED') ||
                  `${err}`.includes('ETIMEDOUT'))) {
-                that.log.error('socket %s', err || '');
+                that.log.error('VARA%s socket %s', that.flavor, err || '');
                 that.close();
             } else {
-                that.log.debug('socket error %s', err || '');
+                that.log.debug('VARA%s socket error %s', that.flavor, err || '');
             }
         });
         // VARA might close the socket. The documentation doesn't say.
         this.socket.on('close', function(info) {
-            that.log.debug('socket close %s', info || '');
+            that.log.debug('VARA%s socket close %s', that.flavor, info || '');
             if (!that.iAmClosed) {
                 that.connectVARA();
             }
@@ -327,11 +325,16 @@ class Server extends EventEmitter {
             });
         });
         this.socket.pipe(new VARAReceiver(this.options, this.flavor, this));
-        this.socket.connect(this.myOptions);
-        this.toVARA('VERSION', 'VERSION');
-        this.toVARA(`MYCALL ${this.myCall}`, 'OK');
-        // this.toVARA(`CHAT OFF`, 'OK'); // seems to be unnecessary
-        this.toVARA('LISTEN ON', 'OK');
+        this.socket.connect(this.options, function(err) {
+            if (err) {
+                that.log.warn(err, `VARA${that.flavor} socket`);
+            }
+            that.toVARA('VERSION', 'VERSION');
+            that.toVARA(`MYCALL ${that.myCall}`, 'OK');
+            // that.toVARA(`CHAT OFF`, 'OK'); // seems to be unnecessary
+            that.toVARA('LISTEN ON', 'OK');
+            that.emit('listening', that.myCall);
+        });
     }
 
     connectDataSocket() {
@@ -356,8 +359,8 @@ class Server extends EventEmitter {
                 });
             });
             this.dataSocket.connect({
-                host: this.myOptions.host,
-                port: this.myOptions.dataPort,
+                host: this.options.host,
+                port: this.options.dataPort,
             });
         }
     }
