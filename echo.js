@@ -1,7 +1,7 @@
 /** Echo AX.25 traffic. */
 
 const Config = require('./config').readFile(process.argv[2] || 'config.ini');
-const AGWPE = require('./agwapi');
+const AGWPE = require('./agwpeapi');
 const VARA = require('./varaapi');
 
 function serve(section, serverClass, flavor) {
@@ -37,7 +37,7 @@ function serve(section, serverClass, flavor) {
         server.listen({callTo: options.myCallSigns}, function(info) {
             log.info(`${section} listening %o`, info);
         });
-    }
+   }
 }
 
 serve('AGWPE', AGWPE.Server);

@@ -108,6 +108,6 @@ function serve(section, moduleName, flavor) {
     }
 }
 
-serve('AGWPE', './agwapi');
+serve('AGWPE', './agwpeapi');
 serve('VARA FM', './varaapi', 'FM');
 serve('VARA HF', './varaapi', 'HF');

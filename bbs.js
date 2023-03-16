@@ -1,7 +1,7 @@
 /** Serve as a BBS that looks like JNOS. */
 
 const Config = require('./config').readFile(process.argv[2] || 'config.ini');
-const AGW = require('./agwapi');
+const AGW = require('./agwpeapi');
 const VARA = require('./varaapi');
 const EventEmitter = require('events');
 const LDAP = require('ldapjs-promise');
