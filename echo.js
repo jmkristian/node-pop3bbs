@@ -2,7 +2,7 @@
 
 const Config = require('./config').readFile(process.argv[2] || 'config.ini');
 const AGWPE = require('@jmkristian/node-agwpe');
-const VARA = require('./varaapi');
+const VARA = require('@jmkristian/node-vara');
 
 function serve(section, serverClass, flavor) {
     const options = Config[section];
