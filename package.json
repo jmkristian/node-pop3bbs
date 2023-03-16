@@ -12,6 +12,7 @@
     "ldapjs": "^2.3.1",
     "ldapjs-promise": "^1.0.6",
     "nodemailer": "^6.7.2",
+    "@jmkristian/node-agwpe": "^0.1.0",
     "yapople": "^0.4.8"
   },
   "devDependencies": {},

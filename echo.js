@@ -1,7 +1,7 @@
 /** Echo AX.25 traffic. */
 
 const Config = require('./config').readFile(process.argv[2] || 'config.ini');
-const AGWPE = require('./agwpeapi');
+const AGWPE = require('@jmkristian/node-agwpe');
 const VARA = require('./varaapi');
 
 function serve(section, serverClass, flavor) {
