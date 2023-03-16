@@ -178,7 +178,7 @@ class Server extends EventEmitter {
         this.flavor = flavor ? ` ${flavor}` : '';
         this.log = getLogger(options, this);
         if (!this.options) {
-            this.emit('error', new Error(`VARA${flavor} missing options`));
+            this.emit('error', new Error(`VARA${this.flavor} missing options`));
             this.close();
         } else {
             this.outputBuffer = [];
@@ -303,13 +303,12 @@ class Server extends EventEmitter {
         this.socket = new Net.Socket();
         var that = this;
         this.socket.on('error', function(err) {
+            that.log.trace('VARA%s socket %s', that.flavor, err || '');
+            that.emit('error', err);
             if (err &&
                 (`${err}`.includes('ECONNREFUSED') ||
                  `${err}`.includes('ETIMEDOUT'))) {
-                that.log.error('VARA%s socket %s', that.flavor, err || '');
                 that.close();
-            } else {
-                that.log.debug('VARA%s socket error %s', that.flavor, err || '');
             }
         });
         // VARA might close the socket. The documentation doesn't say.

@@ -44,6 +44,7 @@ const Net = require('net');
 const Stream = require('stream');
 
 const HeaderLength = 36;
+const DefaultFrameLength = 128;
 const NoPID = 0xF0;
 const KByte = 1 << 10;
 
@@ -193,7 +194,8 @@ class AGWReader extends Stream.Transform {
             readableObjectMode: true,
             readableHighWaterMark: 1, // frame
             writableObjectMode: false,
-            writableHighWaterMark: HeaderLength + options.frameLength, // bytes
+            writableHighWaterMark: HeaderLength +
+                (options.frameLength || DefaultFrameLength), // bytes
         });
         this.header = Buffer.alloc(HeaderLength);
         this.headerLength = 0;
@@ -264,7 +266,8 @@ class AGWWriter extends Stream.Transform {
     constructor(options) {
         super({
             readableObjectMode: false,
-            readableHighWaterMark: HeaderLength + options.frameLength, // bytes
+            readableHighWaterMark: HeaderLength +
+                (options.frameLength || DefaultFrameLength), // bytes
             writableObjectMode: true,
             writableHighWaterMark: 1, // frame
             defaultEncoding: options && options.encoding,
@@ -702,14 +705,14 @@ class DataToFrames extends Stream.Transform {
             readableObjectMode: true,
             readableHighWaterMark: 1,
             writableObjectMode: false,
-            writableHighWaterMark: options.frameLength,
+            writableHighWaterMark: options.frameLength || DefaultFrameLength,
         });
         this.log = getLogger(options, this);
         this.log.trace('new %o', options);
         this.port = frame.port;
         this.myCall = frame.callTo;
         this.theirCall = frame.callFrom;
-        this.maxDataLength = options.frameLength;
+        this.maxDataLength = options.frameLength || DefaultFrameLength;
         this.bufferCount = 0;
     }
 
@@ -823,7 +826,7 @@ class Connection extends Stream.Duplex {
             readableObjectMode: false,
             readableHighWaterMark: 4 * KByte,
             writableObjectMode: false,
-            writableHighWaterMark: options.frameLength,
+            writableHighWaterMark: options.frameLength || DefaultFrameLength,
         });
         this.log = getLogger(options, this);
         this.log.trace('new %o', options);

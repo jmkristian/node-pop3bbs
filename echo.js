@@ -20,7 +20,7 @@ function serve(section, serverClass, flavor) {
                     }
                 });
                 c.on('error', function(err) {
-                    console.log(`${section} ${flavor||''} error ${err}`);
+                    console.log(`${section} error ${err}`);
                 });
                 c.on('finish', function(err) {
                     console.log(`${section} finish`);
@@ -32,7 +32,7 @@ function serve(section, serverClass, flavor) {
             flavor
         );
         server.on('error', function(err) {
-            console.log(section + ' ' + (flavor || '') + ' error ' + (err || ''));
+            console.log(section + ' error ' + (err || ''));
         });
         server.listen({callTo: options.myCallSigns}, function(info) {
             log.info(`${section} listening %o`, info);

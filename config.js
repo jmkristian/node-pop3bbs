@@ -8,7 +8,6 @@ function groomTNC(logger, options, defaultPort) {
             options.logger = logger;
         }
         options.port = parseInt(options.port || `${defaultPort}`);
-        options.frameLength = parseInt(options.frameLength || '256');
         if (options.myCallSigns) {
             options.myCallSigns = options.myCallSigns.trim().split(/\s+/);
         }
