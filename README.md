@@ -47,7 +47,7 @@ You can convert it to a more humane format by piping it through
 `./node_modules/.bin/bunyan --output short` .
 
 This software works on Windows and Linux, with
-[node.js](https://nodejs.org/en/) versions 8.17.0 and 10.18.1,
+[node.js](https://nodejs.org/en/) versions 8.17.0, 10.18.1 and 12.22.12,
 [Direwolf](https://github.com/wb2osz/direwolf) version 1.7a,
 and [UZ7HO SoundModem](http://uz7.ho.ua/packetradio.htm) version 1.13.
-It might work with older versions or on Mac, but I haven't tried it.
+It might work with other versions or on Mac, but I haven't tried it.

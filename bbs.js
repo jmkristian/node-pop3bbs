@@ -59,16 +59,6 @@ const Prompt = `(#1) >${EOL}`;
 
 var serialNumber = 0;
 
-function getLogger(config, that) {
-    if (!config.logger) {
-        return LogNothing;
-    } else if (that) {
-        return config.logger.child({'class': that.constructor.name});
-    } else {
-        return config.logger;
-    }
-}
-
 function column(width, data) {
     switch(typeof data) {
     // case 'undefined':
@@ -195,7 +185,6 @@ class Session {
 
     parse(buffer) {
         if (!buffer || buffer.length <= 0) return;
-        // this.log.trace('parse %o %s', this.lookingFor, AGW.toDataSummary(buffer));
         // Concatenate this.buffer + buffer:
         var next = this.buffer.length;
         var buf = Buffer.alloc(next + buffer.length);
@@ -231,7 +220,6 @@ class Session {
                     if (end >= start) { // We found a message.
                         var messageBody = Buffer.alloc(end - start);
                         buf.copy(messageBody, 0, start, end);
-                        // this.log.trace('found message body %j', AGW.toDataSummary(messageBody));
                         if (!aborted) {
                             this.sendMessage(messageBody);
                         }
@@ -663,24 +651,25 @@ class Session {
     }
 }
 
-function serve(section, serverClass, flavor) {
+function serve(section, serverClass) {
     const options = Config[section];
     if (options) {
-        const server = new serverClass(options, undefined, flavor);
+        const server = new serverClass(options);
         const log = options.logger;
         server.on('error', function(err) {
-            log.warn(err, `${section} error`);
+            log.warn(err, `error`);
         });
         server.on('connection', function(c) {
-            log.debug(`${section} connection`);
-            var session = new Session(c, c.theirCall);
+            log.debug(`connection`);
+            var session = new Session(c, c.remoteAddress);
         });
-        server.listen({callTo: options.myCallSigns}, function(info) {
-            log.info(`${section} listening %o`, info);
+        server.listen({host: options.myCallSigns}, function(info) {
+            log.info(`listening %s`, JSON.stringify(info));
         });
     }
 }
 
 serve('AGWPE', AGW.Server);
-serve('VARA FM', VARA.Server, 'FM');
-serve('VARA HF', VARA.Server, 'HF');
+serve('VARA FM', VARA.Server);
+serve('VARA HF', VARA.Server);
+setTimeout(function(){}, 3000);

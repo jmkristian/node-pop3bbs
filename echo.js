@@ -32,10 +32,10 @@ function serve(section, serverClass, flavor) {
             flavor
         );
         server.on('error', function(err) {
-            console.log(section + ' error ' + (err || ''));
+            console.log(`${section} error ` + (err || ''));
         });
-        server.listen({callTo: options.myCallSigns}, function(info) {
-            log.info(`${section} listening %o`, info);
+        server.listen({host: options.myCallSigns}, function(info) {
+            console.log(`${section} listening %o`, info);
         });
    }
 }

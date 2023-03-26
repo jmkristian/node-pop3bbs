@@ -79,7 +79,7 @@ function serve(section, moduleName, flavor) {
         server.on('error', function(err) {log.warn(err, `${section} error`);});
         server.on('close', function(err) {log.info(`${section} closed`);});
         server.on('connection', function(connection) {
-            log.info('%s connected from %s', section, connection.theirCall);
+            log.info('%s connected from %s', section, connection.remoteAddress);
             connection.on('error', function(err) {log.warn(err, `${section}`);});
             connection.on('timeout', function(err) {log.warn(err, `${section}`);});
             connection.on('finish', function() {log.debug(`${section} finished`);});
@@ -102,7 +102,7 @@ function serve(section, moduleName, flavor) {
                 }
             });
         });
-        server.listen({callTo: options.myCallSigns}, function(info) {
+        server.listen({host: options.myCallSigns}, function(info) {
             log.info(`${section} listening %o`, info);
         });
     }

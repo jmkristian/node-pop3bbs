@@ -1,41 +1,59 @@
+const Bunyan = require('bunyan');
 const fs = require('fs');
 const ini = require('ini');
 const URL = require('url').URL;
 
-function groomTNC(logger, options, defaultPort) {
+const LogNothing = Bunyan.createLogger({
+    name: 'BBS',
+    level: Bunyan.FATAL + 100,
+});
+
+function groomTNC(config, section, defaultPort) {
+    const options = config[section];
     if (options) {
         if (!options.logger) {
-            options.logger = logger;
+            if (config.log) {
+                var newLog = Object.assign({}, config.log);
+                newLog.name = section;
+                options.logger = Bunyan.createLogger(newLog);
+            } else {
+                options.logger = LogNothing;
+            }
         }
-        options.port = parseInt(options.port || `${defaultPort}`);
+        options.port = parseInt(options.port || (defaultPort + ''));
         if (options.myCallSigns) {
             options.myCallSigns = options.myCallSigns.trim().split(/\s+/);
+        } else {
+            delete options.myCallSigns;
         }
     }
 }
 
+function groomVARA(config, section, defaultPort) {
+    groomTNC(config, section, defaultPort);
+    const options = config[section];
+    if (options) {
+        options.dataPort = parseInt(options.dataPort || (options.port + 1) + '');
+    }
+}
+
 function groom(config) {
-    if (!config.logger && config.log) {
-        const Bunyan = require('bunyan');
-        if (config.log.name == null) {
-            config.log.name = ':';
+    if (!config.logger) {
+        if (config.log) {
+            if (!config.log.name) {
+                config.log.name = 'BBS';
+            }
+            if (config.log.level) {
+                config.log.level = Bunyan[config.log.level];
+            }
+            config.logger = Bunyan.createLogger(config.log);
+        } else {
+            config.logger = LogNothing;
         }
-        if (config.log.level) {
-            config.log.level = Bunyan[config.log.level];
-        }
-        config.logger = Bunyan.createLogger(config.log);
     }
-    groomTNC(config.logger, config.AGWPE, 8000);
-    groomTNC(config.logger, config['VARA HF'], 8300);
-    groomTNC(config.logger, config['VARA FM'], 8300);
-    if (config['VARA FM']) {
-        config['VARA FM'].dataPort = parseInt(
-            config['VARA FM'].dataPort || (config['VARA FM'].port + 1) + '');
-    }
-    if (config['VARA HF']) {
-        config['VARA HF'].dataPort = parseInt(
-            config['VARA HF'].dataPort || (config['VARA HF'].port + 1) + '');
-    }
+    groomTNC(config, 'AGWPE', 8000);
+    groomVARA(config, 'VARA HF', 8300);
+    groomVARA(config, 'VARA FM', 8300);
     if (config.LDAP) {
         if (!config.LDAP.userIdAttribute) {
             config.LDAP.userIdAttribute = 'uid';
