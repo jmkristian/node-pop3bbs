@@ -3,6 +3,8 @@
 const Config = require('./config').readFile(process.argv[2] || 'config.ini');
 const AGW = require('@jmkristian/node-agwpe');
 const VARA = require('@jmkristian/node-vara');
+//const AGW = require('../node-agwpe');
+//const VARA = require('../node-vara');
 const EventEmitter = require('events');
 const LDAP = require('ldapjs-promise');
 const POP = require('yapople');
@@ -654,7 +656,9 @@ class Session {
 function serve(section, serverClass) {
     const options = Config[section];
     if (options) {
-        const server = new serverClass(options);
+        const serverOptions = Object.assign({}, options);
+        delete serverOptions.myCallSigns;
+        const server = new serverClass(serverOptions);
         const log = options.logger;
         server.on('error', function(err) {
             log.warn(err, `error`);
