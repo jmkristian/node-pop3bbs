@@ -668,7 +668,7 @@ function serve(section, serverClass) {
             var session = new Session(c, c.remoteAddress);
         });
         server.listen({host: options.myCallSigns}, function(info) {
-            log.info(`listening %s`, JSON.stringify(info));
+            log.info(`listening %o`, info);
         });
     }
 }
