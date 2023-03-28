@@ -32,8 +32,8 @@ function groomTNC(config, section, defaultPort) {
 function groomVARA(config, section, defaultPort) {
     groomTNC(config, section, defaultPort);
     const options = config[section];
-    if (options) {
-        options.dataPort = parseInt(options.dataPort || (options.port + 1) + '');
+    if (options && options.dataPort) {
+        options.dataPort = parseInt(`${options.dataPort}`);
     }
 }
 
