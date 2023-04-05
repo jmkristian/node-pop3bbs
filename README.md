@@ -42,9 +42,9 @@ This is useful for publishing bulletins to be read by all users.
 Outpost can be configured to automatically download these bulletins,
 and not download a bulletin repeatedly.
 
-The output from bbs.js is generated using [Bunyan](https://www.npmjs.com/package/bunyan).
-You can convert it to a more humane format by piping it through
-`./node_modules/.bin/bunyan --output short` .
+The output from bbs.js is generated using
+[Bunyan](https://www.npmjs.com/package/bunyan) and
+[bunyan-format](https://www.npmjs.com/package/bunyan-format).
 
 This software works on Windows and Linux, with
 [node.js](https://nodejs.org/en/) versions 8.17.0, 10.18.1 and 12.22.12,

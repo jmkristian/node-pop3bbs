@@ -4,7 +4,6 @@ const fs = require('fs');
 const ini = require('ini');
 const URL = require('url').URL;
 
-var logStream = bunyanFormat({outputMode: 'short', color: false}, process.stderr);
 const LogNothing = Bunyan.createLogger({
     name: 'BBS',
     level: Bunyan.FATAL + 100,
