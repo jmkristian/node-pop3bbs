@@ -137,8 +137,14 @@ class Session {
         this.client.on('error', function(err) {
             that.log.warn(err, 'client');
         });
-        this.client.on('close', function afterClose() {
-            that.log.info('end');
+        this.client.on('finish', function(info) {
+            that.log.debug('client emitted finish(%s)', info || '');
+        });
+        this.client.on('end', function(info) {
+            that.log.debug('client emitted end(%j)', info || '');
+        });
+        this.client.on('close', function afterClose(info) {
+            that.log.info('client closed(%s)', info || '');
             that.closePOP(); // asynchronously
         });
         this.client.on('data', function(buffer) {
@@ -520,7 +526,9 @@ class Session {
         case 'b':
         case 'bye':
             this.closePOP(function() {
-                that.client.end(`Goodbye.${EOL}`);
+                that.client.end(`Goodbye.${EOL}`, 'utf-8', function() {
+                    that.client.destroy();
+                });
             });
             return;
         default:
