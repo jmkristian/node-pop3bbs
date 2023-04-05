@@ -1,8 +1,10 @@
 const Bunyan = require('bunyan');
+const bunyanFormat = require('bunyan-format');
 const fs = require('fs');
 const ini = require('ini');
 const URL = require('url').URL;
 
+var logStream = bunyanFormat({outputMode: 'short', color: false}, process.stderr);
 const LogNothing = Bunyan.createLogger({
     name: 'BBS',
     level: Bunyan.FATAL + 100,
@@ -39,16 +41,23 @@ function groomVARA(config, section, defaultPort) {
 
 function groom(config) {
     if (!config.logger) {
-        if (config.log) {
+        if (!config.log) {
+            config.logger = LogNothing;
+        } else {
+            if (!config.log.stream && config.log.outputMode) {
+                config.log.stream = bunyanFormat({
+                    outputMode: config.log.outputMode,
+                    color: false,
+                });
+            }
             if (!config.log.name) {
                 config.log.name = 'BBS';
             }
             if (config.log.level) {
                 config.log.level = Bunyan[config.log.level];
             }
-            config.logger = Bunyan.createLogger(config.log);
-        } else {
-            config.logger = LogNothing;
+            config.logger = Bunyan.createLogger(Object.assign(
+                {}, config.log, {outputMode: undefined}));
         }
     }
     groomTNC(config, 'AGWPE', 8000);

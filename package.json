@@ -10,6 +10,7 @@
     "@jmkristian/node-agwpe": "^1.0.3",
     "@jmkristian/node-vara": "^1.0.2",
     "bunyan": "^1.8.15",
+    "bunyan-format": "^0.2.1",
     "ini": "^2.0.0",
     "ldapjs": "^2.3.1",
     "ldapjs-promise": "^1.0.6",
