@@ -16,6 +16,7 @@ function groomTNC(config, section, defaultPort) {
             if (config.log) {
                 var newLog = Object.assign({}, config.log);
                 newLog.name = section;
+                delete newLog.outputMode;
                 options.logger = Bunyan.createLogger(newLog);
             } else {
                 options.logger = LogNothing;
@@ -23,9 +24,14 @@ function groomTNC(config, section, defaultPort) {
         }
         options.port = parseInt(options.port || (defaultPort + ''));
         if (options.myCallSigns) {
-            options.myCallSigns = options.myCallSigns.trim().split(/\s+/);
+            options.myCallSigns = options.myCallSigns.trim().split(/[\s,]+/);
         } else {
             delete options.myCallSigns;
+        }
+        if (options.myPorts) {
+            options.myPorts = options.myPorts.trim().split(/[\s,]+/);
+        } else {
+            delete options.myPorts;
         }
     }
 }

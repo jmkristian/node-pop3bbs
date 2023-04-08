@@ -675,7 +675,10 @@ function serve(section, serverClass) {
             log.debug(`connection`);
             var session = new Session(c, c.remoteAddress);
         });
-        server.listen({host: options.myCallSigns}, function(info) {
+        server.listen({
+            host: options.myCallSigns,
+            port: options.myPorts,
+        }, function(info) {
             log.info(`listening %o`, info);
         });
     }
