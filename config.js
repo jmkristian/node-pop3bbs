@@ -23,15 +23,15 @@ function groomTNC(config, section, defaultPort) {
             }
         }
         options.port = parseInt(options.port || (defaultPort + ''));
-        if (options.myCallSigns) {
-            options.myCallSigns = options.myCallSigns.trim().split(/[\s,]+/);
+        if (options.localAddress) {
+            options.localAddress = options.localAddress.trim().split(/[\s,]+/);
         } else {
-            delete options.myCallSigns;
+            delete options.localAddress;
         }
-        if (options.myPorts) {
-            options.myPorts = options.myPorts.trim().split(/[\s,]+/);
+        if (options.localPort) {
+            options.localPort = options.localPort.trim().split(/[\s,]+/);
         } else {
-            delete options.myPorts;
+            delete options.localPort;
         }
     }
 }

@@ -9,7 +9,10 @@ function serve(section, serverClass, flavor) {
     if (options) {
         const log = options.logger;
         const server = new serverClass(
-            options,
+            Object.assign({}, options, {
+                localAddress: undefined,
+                localPort: undefined,
+            }),
             function(c) {
                 c.write('Hello. Send "B" to disconnect.\r');
                 c.on('data', function(chunk) {
@@ -34,7 +37,10 @@ function serve(section, serverClass, flavor) {
         server.on('error', function(err) {
             console.log(`${section} error ` + (err || ''));
         });
-        server.listen({host: options.myCallSigns}, function(info) {
+        server.listen({
+            host: options.localAddress,
+            port: options.localPort,
+        }, function(info) {
             console.log(`${section} listening %o`, info);
         });
    }

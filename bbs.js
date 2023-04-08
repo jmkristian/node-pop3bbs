@@ -664,8 +664,10 @@ class Session {
 function serve(section, serverClass) {
     const options = Config[section];
     if (options) {
-        const serverOptions = Object.assign({}, options);
-        delete serverOptions.myCallSigns;
+        const serverOptions = Object.assign({}, options, {
+            localAddress: undefined,
+            localPort: undefined,
+        });
         const server = new serverClass(serverOptions);
         const log = options.logger;
         server.on('error', function(err) {
@@ -676,8 +678,8 @@ function serve(section, serverClass) {
             var session = new Session(c, c.remoteAddress);
         });
         server.listen({
-            host: options.myCallSigns,
-            port: options.myPorts,
+            host: options.localAddress,
+            port: options.localPort,
         }, function(info) {
             log.info(`listening %o`, info);
         });

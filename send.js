@@ -75,7 +75,10 @@ function serve(section, moduleName, flavor) {
     const options = Config[section];
     if (options) {
         const module = require(moduleName);
-        const server = new module.Server(options, undefined, flavor);
+        const server = new module.Server(Object.assign({}, options, {
+            localAddress: undefined,
+            localPort: undefined,
+        }));
         server.on('error', function(err) {log.warn(err, `${section} error`);});
         server.on('close', function(err) {log.info(`${section} closed`);});
         server.on('connection', function(connection) {
@@ -102,7 +105,10 @@ function serve(section, moduleName, flavor) {
                 }
             });
         });
-        server.listen({host: options.myCallSigns}, function(info) {
+        server.listen({
+            host: options.localAddress,
+            port: options.localPort,
+        }, function(info) {
             log.info(`${section} listening %o`, info);
         });
     }
